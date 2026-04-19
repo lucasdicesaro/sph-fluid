@@ -11,8 +11,10 @@ public class Circle : MonoBehaviour
     public Vector2 boundsSize = new Vector2(10f, 10f);
     public Color particleColor = Color.white;
     public float particleSpacing = 0f;
-    public float gravity = 9.8f;
+    public float gravity = 0f;
     public float collisionDamping = 0.8f;
+    public int vectorFieldResolution = 15;
+    public float vectorFieldScale = 0.3f;
 
     private Vector4[] _positions;
     private Vector2[] _velocities;
@@ -101,6 +103,7 @@ public class Circle : MonoBehaviour
         SimulateParticles();
         CalculateDensities();
         UpdateDensityColors();
+        DrawVectorField();
 
         instancedMaterial.SetBuffer("_Positions", _positionBuffer);
         instancedMaterial.SetBuffer("_Colors", _colorBuffer);
@@ -167,6 +170,54 @@ public class Circle : MonoBehaviour
             _colors[i] = Color.Lerp(Color.blue, Color.red, t);
         }
         _colorBuffer.SetData(_colors);
+    }
+
+    Vector2 DensityGradient(Vector2 samplePos)
+    {
+        Vector2 gradient = Vector2.zero;
+        float scale = -24f / (Mathf.PI * Mathf.Pow(smoothingRadius, 8));
+        for (int j = 0; j < numParticles; j++)
+        {
+            Vector2 rVec = samplePos - new Vector2(_positions[j].x, _positions[j].y);
+            float dst = rVec.magnitude;
+            if (dst >= smoothingRadius) continue;
+            float v = smoothingRadius * smoothingRadius - dst * dst;
+            gradient += particleMass * scale * v * v * rVec;
+        }
+        return gradient;
+    }
+
+    void DrawVectorField()
+    {
+        float stepX = boundsSize.x / vectorFieldResolution;
+        float stepY = boundsSize.y / vectorFieldResolution;
+
+        for (int ix = 0; ix <= vectorFieldResolution; ix++)
+        {
+            for (int iy = 0; iy <= vectorFieldResolution; iy++)
+            {
+                Vector2 samplePos = new Vector2(
+                    -boundsSize.x * 0.5f + ix * stepX,
+                    -boundsSize.y * 0.5f + iy * stepY);
+
+                Vector2 grad = DensityGradient(samplePos);
+                if (grad.magnitude < 0.0001f) continue;
+
+                float mag = Mathf.Min(grad.magnitude * vectorFieldScale, stepX * 0.45f);
+                Vector2 dir = grad.normalized;
+                Vector2 tip = samplePos + dir * mag;
+
+                Debug.DrawLine(new Vector3(samplePos.x, samplePos.y, 0),
+                               new Vector3(tip.x, tip.y, 0), Color.yellow);
+
+                Vector2 perp = new Vector2(-dir.y, dir.x) * mag * 0.3f;
+                Vector2 back = samplePos + dir * mag * 0.7f;
+                Debug.DrawLine(new Vector3(tip.x, tip.y, 0),
+                               new Vector3(back.x + perp.x, back.y + perp.y, 0), Color.yellow);
+                Debug.DrawLine(new Vector3(tip.x, tip.y, 0),
+                               new Vector3(back.x - perp.x, back.y - perp.y, 0), Color.yellow);
+            }
+        }
     }
 
     public void UpdatePositions(Vector4[] newPositions)
