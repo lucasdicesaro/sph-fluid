@@ -7,14 +7,14 @@ public class Circle : MonoBehaviour
     public Material instancedMaterial;
     public Material pressureFieldMaterial;
     public int numParticles = 100;
-    public float particleRadius = 0.2f;
+    public float particleRadius = 0.1f;
     public float smoothingRadius = 1f;
     public float particleMass = 1f;
     public float targetDensity = 2f;
     private Vector2 boundsSize;
 
     public float gravity = 0f;
-    public float collisionDamping = 0.8f;
+    [Range(0f, 1f)] public float collisionDamping = 0.8f;
     public float pressureMultiplier = 1f;
 
     [Header("Debug")]
