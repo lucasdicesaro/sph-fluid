@@ -5,26 +5,38 @@ using Stopwatch = System.Diagnostics.Stopwatch;
 public class Circle : MonoBehaviour
 {
     public Material instancedMaterial;
+    public Material pressureFieldMaterial;
     public int numParticles = 100;
     public float particleRadius = 0.2f;
     public float smoothingRadius = 1f;
     public float particleMass = 1f;
     public float targetDensity = 2f;
     private Vector2 boundsSize;
-    public Color particleColor = Color.white;
-    public float particleSpacing = 0f;
+
     public float gravity = 0f;
     public float collisionDamping = 0.8f;
+    public float pressureMultiplier = 1f;
+
+    [Header("Debug")]
     public int vectorFieldResolution = 20;
-    public bool showDensityMs = true;
     public float vectorFieldScale = 0.3f;
+    public bool showDensityMs = false;
+
+    [Header("Visualization")]
+    public Color particleColor = Color.white;
+    public Color negativePressureColor = Color.blue;
+    public Color positivePressureColor = Color.red;
+    public Color zeroPressureColor = Color.green;
 
     private Vector4[] _positions;
     private Vector2[] _velocities;
     private float[]   _densities;
+    private float[]   _pressures;
     private Color[]   _colors;
+    private Color[]   _pressureColors;
     private ComputeBuffer _positionBuffer;
     private ComputeBuffer _colorBuffer;
+    private ComputeBuffer _pressureColorBuffer;
     private Stopwatch _stopwatch = new Stopwatch();
     private double _densityMs;
     private Mesh _quadMesh;
@@ -84,8 +96,10 @@ public class Circle : MonoBehaviour
     {
         _positions  = new Vector4[numParticles];
         _velocities = new Vector2[numParticles];
-        _densities  = new float[numParticles];
-        _colors     = new Color[numParticles];
+        _densities      = new float[numParticles];
+        _pressures      = new float[numParticles];
+        _colors         = new Color[numParticles];
+        _pressureColors = new Color[numParticles];
 
         Vector2 spawnHalf = boundsSize * 0.5f - Vector2.one * particleRadius;
         for (int i = 0; i < numParticles; i++)
@@ -99,8 +113,10 @@ public class Circle : MonoBehaviour
 
         _positionBuffer?.Release();
         _colorBuffer?.Release();
-        _positionBuffer = new ComputeBuffer(numParticles, sizeof(float) * 4);
-        _colorBuffer    = new ComputeBuffer(numParticles, sizeof(float) * 4);
+        _pressureColorBuffer?.Release();
+        _positionBuffer      = new ComputeBuffer(numParticles, sizeof(float) * 4);
+        _colorBuffer         = new ComputeBuffer(numParticles, sizeof(float) * 4);
+        _pressureColorBuffer = new ComputeBuffer(numParticles, sizeof(float) * 4);
         _positionBuffer.SetData(_positions);
         _colorBuffer.SetData(_colors);
     }
@@ -114,14 +130,23 @@ public class Circle : MonoBehaviour
         CalculateDensities();
         _stopwatch.Stop();
         _densityMs = _stopwatch.Elapsed.TotalMilliseconds;
-        UpdateDensityColors();
+        CalculatePressures();
+        UpdatePressureColors();
         DrawVectorField();
 
+        // Draw pressure field behind particles
+        if (pressureFieldMaterial != null)
+        {
+            pressureFieldMaterial.SetBuffer("_Positions", _positionBuffer);
+            pressureFieldMaterial.SetBuffer("_PressureColors", _pressureColorBuffer);
+            pressureFieldMaterial.SetFloat("_SmoothingRadius", smoothingRadius);
+            Graphics.DrawMeshInstancedProcedural(_quadMesh, 0, pressureFieldMaterial, _renderBounds, numParticles);
+        }
+
+        // Draw particles on top
         instancedMaterial.SetBuffer("_Positions", _positionBuffer);
         instancedMaterial.SetBuffer("_Colors", _colorBuffer);
         instancedMaterial.SetFloat("_ParticleRadius", particleRadius);
-        instancedMaterial.SetFloat("_SmoothingRadius", smoothingRadius);
-
         Graphics.DrawMeshInstancedProcedural(_quadMesh, 0, instancedMaterial, _renderBounds, numParticles);
     }
 
@@ -174,14 +199,22 @@ public class Circle : MonoBehaviour
         });
     }
 
-    void UpdateDensityColors()
+    void CalculatePressures()
+    {
+        for (int i = 0; i < numParticles; i++)
+            _pressures[i] = pressureMultiplier * (_densities[i] - targetDensity);
+    }
+
+    void UpdatePressureColors()
     {
         for (int i = 0; i < numParticles; i++)
         {
-            float t = Mathf.Clamp01(_densities[i] / (targetDensity * 2f));
-            _colors[i] = Color.Lerp(Color.blue, Color.red, t);
+            float t = Mathf.Clamp(_pressures[i] / (pressureMultiplier * targetDensity), -1f, 1f);
+            _pressureColors[i] = t > 0
+                ? Color.Lerp(zeroPressureColor, positivePressureColor,  t)
+                : Color.Lerp(zeroPressureColor, negativePressureColor, -t);
         }
-        _colorBuffer.SetData(_colors);
+        _pressureColorBuffer.SetData(_pressureColors);
     }
 
     Vector2 DensityGradient(Vector2 samplePos)
@@ -238,15 +271,11 @@ public class Circle : MonoBehaviour
         GUI.Label(new Rect(10, 10, 300, 20), $"Density: {_densityMs:F3} ms");
     }
 
-    public void UpdatePositions(Vector4[] newPositions)
-    {
-        _positionBuffer.SetData(newPositions);
-    }
-
     void OnDestroy()
     {
         _positionBuffer?.Release();
         _colorBuffer?.Release();
+        _pressureColorBuffer?.Release();
     }
 
     private Mesh CreateQuadMesh()
