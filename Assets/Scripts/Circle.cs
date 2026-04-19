@@ -6,6 +6,8 @@ public class Circle : MonoBehaviour
     public int numParticles = 100;
     public float particleRadius = 0.2f;
     public float smoothingRadius = 1f;
+    public float particleMass = 1f;
+    public float targetDensity = 2f;
     public Vector2 boundsSize = new Vector2(10f, 10f);
     public Color particleColor = Color.white;
     public float particleSpacing = 0f;
@@ -14,7 +16,8 @@ public class Circle : MonoBehaviour
 
     private Vector4[] _positions;
     private Vector2[] _velocities;
-    private Color[] _colors;
+    private float[]   _densities;
+    private Color[]   _colors;
     private ComputeBuffer _positionBuffer;
     private ComputeBuffer _colorBuffer;
     private Mesh _quadMesh;
@@ -70,6 +73,7 @@ public class Circle : MonoBehaviour
     {
         _positions  = new Vector4[numParticles];
         _velocities = new Vector2[numParticles];
+        _densities  = new float[numParticles];
         _colors     = new Color[numParticles];
 
         Vector2 spawnHalf = boundsSize * 0.5f - Vector2.one * particleRadius;
@@ -95,6 +99,8 @@ public class Circle : MonoBehaviour
         if (instancedMaterial == null || _positionBuffer == null) return;
 
         SimulateParticles();
+        CalculateDensities();
+        UpdateDensityColors();
 
         instancedMaterial.SetBuffer("_Positions", _positionBuffer);
         instancedMaterial.SetBuffer("_Colors", _colorBuffer);
@@ -112,11 +118,9 @@ public class Circle : MonoBehaviour
         for (int i = 0; i < numParticles; i++)
         {
             _velocities[i] += Vector2.down * gravity * dt;
-
             _positions[i].x += _velocities[i].x * dt;
             _positions[i].y += _velocities[i].y * dt;
 
-            // Bounce off bounds
             if (Mathf.Abs(_positions[i].x) > halfBounds.x)
             {
                 _positions[i].x = halfBounds.x * Mathf.Sign(_positions[i].x);
@@ -132,7 +136,39 @@ public class Circle : MonoBehaviour
         _positionBuffer.SetData(_positions);
     }
 
-    // Call this whenever positions change (will be used by SPH simulation later)
+    float Poly6Kernel(float dst, float radius)
+    {
+        if (dst >= radius) return 0f;
+        float scale = 4f / (Mathf.PI * Mathf.Pow(radius, 8));
+        float v = radius * radius - dst * dst;
+        return scale * v * v * v;
+    }
+
+    void CalculateDensities()
+    {
+        for (int i = 0; i < numParticles; i++)
+        {
+            _densities[i] = 0f;
+            for (int j = 0; j < numParticles; j++)
+            {
+                float dst = Vector2.Distance(
+                    new Vector2(_positions[i].x, _positions[i].y),
+                    new Vector2(_positions[j].x, _positions[j].y));
+                _densities[i] += particleMass * Poly6Kernel(dst, smoothingRadius);
+            }
+        }
+    }
+
+    void UpdateDensityColors()
+    {
+        for (int i = 0; i < numParticles; i++)
+        {
+            float t = Mathf.Clamp01(_densities[i] / (targetDensity * 2f));
+            _colors[i] = Color.Lerp(Color.blue, Color.red, t);
+        }
+        _colorBuffer.SetData(_colors);
+    }
+
     public void UpdatePositions(Vector4[] newPositions)
     {
         _positionBuffer.SetData(newPositions);
