@@ -8,12 +8,12 @@ public class Circle : MonoBehaviour
     public float smoothingRadius = 1f;
     public float particleMass = 1f;
     public float targetDensity = 2f;
-    public Vector2 boundsSize = new Vector2(10f, 10f);
+    private Vector2 boundsSize;
     public Color particleColor = Color.white;
     public float particleSpacing = 0f;
     public float gravity = 0f;
     public float collisionDamping = 0.8f;
-    public int vectorFieldResolution = 15;
+    public int vectorFieldResolution = 20;
     public float vectorFieldScale = 0.3f;
 
     private Vector4[] _positions;
@@ -28,6 +28,10 @@ public class Circle : MonoBehaviour
 
     void Start()
     {
+        float height = Camera.main.orthographicSize * 2f;
+        float width  = height * Camera.main.aspect;
+        boundsSize   = new Vector2(width, height);
+
         _quadMesh = CreateQuadMesh();
         _renderBounds = new Bounds(Vector3.zero, new Vector3(boundsSize.x + smoothingRadius * 2f, boundsSize.y + smoothingRadius * 2f, 1f));
         SetupBoundsLine();
