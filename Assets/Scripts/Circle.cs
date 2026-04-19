@@ -5,6 +5,7 @@ public class Circle : MonoBehaviour
     public Material instancedMaterial;
     public int numParticles = 100;
     public float particleRadius = 0.2f;
+    public float smoothingRadius = 1f;
     public Vector2 boundsSize = new Vector2(10f, 10f);
     public Color particleColor = Color.white;
     public float particleSpacing = 0f;
@@ -23,7 +24,7 @@ public class Circle : MonoBehaviour
     void Start()
     {
         _quadMesh = CreateQuadMesh();
-        _renderBounds = new Bounds(Vector3.zero, new Vector3(boundsSize.x + particleRadius * 2f, boundsSize.y + particleRadius * 2f, 1f));
+        _renderBounds = new Bounds(Vector3.zero, new Vector3(boundsSize.x + smoothingRadius * 2f, boundsSize.y + smoothingRadius * 2f, 1f));
         SetupBoundsLine();
         InitializeParticles();
     }
@@ -71,12 +72,11 @@ public class Circle : MonoBehaviour
         _velocities = new Vector2[numParticles];
         _colors     = new Color[numParticles];
 
-        int perRow = Mathf.CeilToInt(Mathf.Sqrt(numParticles));
-        float spacing = particleRadius * 2f + particleSpacing;
+        Vector2 spawnHalf = boundsSize * 0.5f - Vector2.one * particleRadius;
         for (int i = 0; i < numParticles; i++)
         {
-            float x = (i % perRow - perRow * 0.5f + 0.5f) * spacing;
-            float y = (i / perRow - perRow * 0.5f + 0.5f) * spacing;
+            float x = Random.Range(-spawnHalf.x, spawnHalf.x);
+            float y = Random.Range(-spawnHalf.y, spawnHalf.y);
             _positions[i]  = new Vector4(x, y, 0f, 0f);
             _velocities[i] = Vector2.zero;
             _colors[i]     = particleColor;
@@ -99,6 +99,7 @@ public class Circle : MonoBehaviour
         instancedMaterial.SetBuffer("_Positions", _positionBuffer);
         instancedMaterial.SetBuffer("_Colors", _colorBuffer);
         instancedMaterial.SetFloat("_ParticleRadius", particleRadius);
+        instancedMaterial.SetFloat("_SmoothingRadius", smoothingRadius);
 
         Graphics.DrawMeshInstancedProcedural(_quadMesh, 0, instancedMaterial, _renderBounds, numParticles);
     }
