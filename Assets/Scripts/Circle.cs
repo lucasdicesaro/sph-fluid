@@ -1,4 +1,6 @@
 using UnityEngine;
+using System.Threading.Tasks;
+using Stopwatch = System.Diagnostics.Stopwatch;
 
 public class Circle : MonoBehaviour
 {
@@ -14,6 +16,7 @@ public class Circle : MonoBehaviour
     public float gravity = 0f;
     public float collisionDamping = 0.8f;
     public int vectorFieldResolution = 20;
+    public bool showDensityMs = true;
     public float vectorFieldScale = 0.3f;
 
     private Vector4[] _positions;
@@ -22,6 +25,8 @@ public class Circle : MonoBehaviour
     private Color[]   _colors;
     private ComputeBuffer _positionBuffer;
     private ComputeBuffer _colorBuffer;
+    private Stopwatch _stopwatch = new Stopwatch();
+    private double _densityMs;
     private Mesh _quadMesh;
     private Bounds _renderBounds;
     private LineRenderer _boundsLine;
@@ -105,7 +110,10 @@ public class Circle : MonoBehaviour
         if (instancedMaterial == null || _positionBuffer == null) return;
 
         SimulateParticles();
+        _stopwatch.Restart();
         CalculateDensities();
+        _stopwatch.Stop();
+        _densityMs = _stopwatch.Elapsed.TotalMilliseconds;
         UpdateDensityColors();
         DrawVectorField();
 
@@ -153,7 +161,7 @@ public class Circle : MonoBehaviour
 
     void CalculateDensities()
     {
-        for (int i = 0; i < numParticles; i++)
+        Parallel.For(0, numParticles, i =>
         {
             _densities[i] = 0f;
             for (int j = 0; j < numParticles; j++)
@@ -163,7 +171,7 @@ public class Circle : MonoBehaviour
                     new Vector2(_positions[j].x, _positions[j].y));
                 _densities[i] += particleMass * Poly6Kernel(dst, smoothingRadius);
             }
-        }
+        });
     }
 
     void UpdateDensityColors()
@@ -222,6 +230,12 @@ public class Circle : MonoBehaviour
                                new Vector3(back.x - perp.x, back.y - perp.y, 0), Color.yellow);
             }
         }
+    }
+
+    void OnGUI()
+    {
+        if (!showDensityMs) return;
+        GUI.Label(new Rect(10, 10, 300, 20), $"Density: {_densityMs:F3} ms");
     }
 
     public void UpdatePositions(Vector4[] newPositions)
