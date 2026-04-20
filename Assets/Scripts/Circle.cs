@@ -197,8 +197,8 @@ public class Circle : MonoBehaviour
 
     Vector2 CalculatePressureForce(int i)
     {
-        Vector2 force     = Vector2.zero;
-        float pressureI   = PressureFromDensity(_densities[i]);
+        Vector2 force   = Vector2.zero;
+        float pressureI = PressureFromDensity(_densities[i]);
         for (int j = 0; j < numParticles; j++)
         {
             if (i == j) continue;
@@ -206,10 +206,10 @@ public class Circle : MonoBehaviour
                                        _positions[i].y - _positions[j].y);
             float dst = rVec.magnitude;
             if (dst >= smoothingRadius || dst < 0.0001f) continue;
-            Vector2 dir    = rVec / dst;
-            float grad     = SmoothingKernelDerivative(dst, smoothingRadius);
-            float sharedP  = (pressureI + PressureFromDensity(_densities[j])) / (2f * _densities[j]);
-            force          += particleMass * sharedP * grad * dir;
+            Vector2 dir   = rVec / dst;
+            float grad    = SmoothingKernelDerivative(dst, smoothingRadius);
+            float sharedP = (pressureI + PressureFromDensity(_densities[j])) / (_densities[i] + _densities[j]);
+            force        += particleMass * sharedP * grad * dir;
         }
         return force;
     }
