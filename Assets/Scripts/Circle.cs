@@ -104,9 +104,26 @@ public class Circle : MonoBehaviour
         Vector2 spawnHalf = boundsSize * 0.5f - Vector2.one * particleRadius;
         for (int i = 0; i < numParticles; i++)
         {
-            float x = Random.Range(-spawnHalf.x, spawnHalf.x);
-            float y = Random.Range(-spawnHalf.y, spawnHalf.y);
-            _positions[i]  = new Vector4(x, y, 0f, 0f);
+            Vector2 pos;
+            int attempts = 0;
+            bool valid;
+            do
+            {
+                pos   = new Vector2(Random.Range(-spawnHalf.x, spawnHalf.x),
+                                    Random.Range(-spawnHalf.y, spawnHalf.y));
+                valid = true;
+                for (int j = 0; j < i; j++)
+                {
+                    if (Vector2.Distance(pos, new Vector2(_positions[j].x, _positions[j].y)) < particleRadius * 2f)
+                    {
+                        valid = false;
+                        break;
+                    }
+                }
+                attempts++;
+            } while (!valid && attempts < 100);
+
+            _positions[i]  = new Vector4(pos.x, pos.y, 0f, 0f);
             _velocities[i] = Vector2.zero;
             _colors[i]     = particleColor;
         }
