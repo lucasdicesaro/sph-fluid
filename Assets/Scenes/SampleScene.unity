@@ -515,13 +515,17 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: '::'
   instancedMaterial: {fileID: 2100000, guid: 74ff1a988b64144798c69d4fb9661731, type: 2}
-  numParticles: 100
+  numParticles: 300
   particleRadius: 0.2
-  boundsSize: {x: 10, y: 10}
+  smoothingRadius: 1
+  particleMass: 1
+  targetDensity: 2
   particleColor: {r: 0.4000089, g: 0.766348, b: 0.9528302, a: 1}
   particleSpacing: 0
-  gravity: 9.8
+  gravity: 0
   collisionDamping: 0.8
+  vectorFieldResolution: 20
+  vectorFieldScale: 0.3
 --- !u!4 &1253938307
 Transform:
   m_ObjectHideFlags: 0

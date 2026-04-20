@@ -33,8 +33,6 @@ public class Circle : MonoBehaviour
     private Vector4[] _positions;
     private Vector2[] _velocities;
     private float[]   _densities;
-    private float[]   _pressures;
-    private Vector2[] _pressureForces;
     private Color[]   _colors;
     private Color[]   _pressureColors;
     private ComputeBuffer _positionBuffer;
@@ -100,8 +98,6 @@ public class Circle : MonoBehaviour
         _positions      = new Vector4[numParticles];
         _velocities     = new Vector2[numParticles];
         _densities      = new float[numParticles];
-        _pressures      = new float[numParticles];
-        _pressureForces = new Vector2[numParticles];
         _colors         = new Color[numParticles];
         _pressureColors = new Color[numParticles];
 
@@ -132,14 +128,10 @@ public class Circle : MonoBehaviour
         _stopwatch.Restart();
         float dt = Time.deltaTime / subSteps;
         for (int step = 0; step < subSteps; step++)
-        {
-            CalculateDensities();
-            CalculatePressures();
-            CalculatePressureForces();
-            SimulateParticles(dt);
-        }
+            SimulationStep(dt);
         _stopwatch.Stop();
         _densityMs = _stopwatch.Elapsed.TotalMilliseconds;
+
         UpdatePressureColors();
         DrawVectorField();
 
@@ -157,34 +149,85 @@ public class Circle : MonoBehaviour
         Graphics.DrawMeshInstancedProcedural(_quadMesh, 0, instancedMaterial, _renderBounds, numParticles);
     }
 
-    void SimulateParticles(float dt)
+    void SimulationStep(float dt)
     {
-        Vector2 halfBounds = boundsSize * 0.5f - Vector2.one * particleRadius;
-
+        // Pass 1: apply gravity + calculate densities
         Parallel.For(0, numParticles, i =>
         {
             _velocities[i] += Vector2.down * gravity * dt;
-            if (_densities[i] > 0f)
-                _velocities[i] += _pressureForces[i] / _densities[i] * dt;
+            _densities[i]   = CalculateDensity(_positions[i]);
+        });
 
-            _velocities[i] *= Mathf.Pow(1f - damping, dt);
+        // Pass 2: calculate pressure force + apply acceleration + damping
+        Parallel.For(0, numParticles, i =>
+        {
+            Vector2 pressureForce        = CalculatePressureForce(i);
+            _velocities[i]              += pressureForce / _densities[i] * dt;
+            _velocities[i]              *= Mathf.Pow(1f - damping, dt);
+        });
 
+        // Pass 3: integrate positions + resolve bounds collisions
+        Parallel.For(0, numParticles, i =>
+        {
             _positions[i].x += _velocities[i].x * dt;
             _positions[i].y += _velocities[i].y * dt;
-
-            if (Mathf.Abs(_positions[i].x) > halfBounds.x)
-            {
-                _positions[i].x = halfBounds.x * Mathf.Sign(_positions[i].x);
-                _velocities[i].x *= -collisionDamping;
-            }
-            if (Mathf.Abs(_positions[i].y) > halfBounds.y)
-            {
-                _positions[i].y = halfBounds.y * Mathf.Sign(_positions[i].y);
-                _velocities[i].y *= -collisionDamping;
-            }
+            ResolveCollisions(ref _positions[i], ref _velocities[i]);
         });
 
         _positionBuffer.SetData(_positions);
+    }
+
+    float CalculateDensity(Vector4 position)
+    {
+        float density = 0f;
+        for (int j = 0; j < numParticles; j++)
+        {
+            float dst = Vector2.Distance(new Vector2(position.x, position.y),
+                                         new Vector2(_positions[j].x, _positions[j].y));
+            density += particleMass * Poly6Kernel(dst, smoothingRadius);
+        }
+        return density;
+    }
+
+    float PressureFromDensity(float density)
+    {
+        float ratio = density / targetDensity;
+        return Mathf.Max(0f, pressureMultiplier * (Mathf.Pow(ratio, 7) - 1f));
+    }
+
+    Vector2 CalculatePressureForce(int i)
+    {
+        Vector2 force     = Vector2.zero;
+        float pressureI   = PressureFromDensity(_densities[i]);
+        for (int j = 0; j < numParticles; j++)
+        {
+            if (i == j) continue;
+            Vector2 rVec = new Vector2(_positions[i].x - _positions[j].x,
+                                       _positions[i].y - _positions[j].y);
+            float dst = rVec.magnitude;
+            if (dst >= smoothingRadius || dst < 0.0001f) continue;
+            Vector2 dir    = rVec / dst;
+            float grad     = SpikyKernelGradient(dst, smoothingRadius);
+            float sharedP  = (pressureI + PressureFromDensity(_densities[j])) / (2f * _densities[j]);
+            force          -= particleMass * sharedP * grad * dir;
+        }
+        return force;
+    }
+
+    void ResolveCollisions(ref Vector4 position, ref Vector2 velocity)
+    {
+        Vector2 halfBounds = boundsSize * 0.5f - Vector2.one * particleRadius;
+
+        if (Mathf.Abs(position.x) > halfBounds.x)
+        {
+            position.x  = halfBounds.x * Mathf.Sign(position.x);
+            velocity.x *= -collisionDamping;
+        }
+        if (Mathf.Abs(position.y) > halfBounds.y)
+        {
+            position.y  = halfBounds.y * Mathf.Sign(position.y);
+            velocity.y *= -collisionDamping;
+        }
     }
 
     float Poly6Kernel(float dst, float radius)
@@ -195,30 +238,6 @@ public class Circle : MonoBehaviour
         return scale * v * v * v;
     }
 
-    void CalculateDensities()
-    {
-        Parallel.For(0, numParticles, i =>
-        {
-            _densities[i] = 0f;
-            for (int j = 0; j < numParticles; j++)
-            {
-                float dst = Vector2.Distance(
-                    new Vector2(_positions[i].x, _positions[i].y),
-                    new Vector2(_positions[j].x, _positions[j].y));
-                _densities[i] += particleMass * Poly6Kernel(dst, smoothingRadius);
-            }
-        });
-    }
-
-    void CalculatePressures()
-    {
-        Parallel.For(0, numParticles, i =>
-        {
-            float ratio = _densities[i] / targetDensity;
-            _pressures[i] = Mathf.Max(0f, pressureMultiplier * (Mathf.Pow(ratio, 7) - 1f));
-        });
-    }
-
     float SpikyKernelGradient(float dst, float radius)
     {
         if (dst >= radius || dst < 0.0001f) return 0f;
@@ -227,31 +246,12 @@ public class Circle : MonoBehaviour
         return scale * v * v;
     }
 
-    void CalculatePressureForces()
-    {
-        Parallel.For(0, numParticles, i =>
-        {
-            _pressureForces[i] = Vector2.zero;
-            for (int j = 0; j < numParticles; j++)
-            {
-                if (i == j) continue;
-                Vector2 rVec = new Vector2(_positions[i].x - _positions[j].x,
-                                           _positions[i].y - _positions[j].y);
-                float dst = rVec.magnitude;
-                if (dst >= smoothingRadius || dst < 0.0001f) continue;
-                Vector2 dir   = rVec / dst;
-                float grad    = SpikyKernelGradient(dst, smoothingRadius);
-                float sharedP = (_pressures[i] + _pressures[j]) / (2f * _densities[j]);
-                _pressureForces[i] -= particleMass * sharedP * grad * dir;
-            }
-        });
-    }
-
     void UpdatePressureColors()
     {
         for (int i = 0; i < numParticles; i++)
         {
-            float t = Mathf.Clamp(_pressures[i] / (pressureMultiplier * targetDensity), -1f, 1f);
+            float pressure = PressureFromDensity(_densities[i]);
+            float t = Mathf.Clamp(pressure / (pressureMultiplier * targetDensity), -1f, 1f);
             _pressureColors[i] = t > 0
                 ? Color.Lerp(zeroPressureColor, positivePressureColor,  t)
                 : Color.Lerp(zeroPressureColor, negativePressureColor, -t);
