@@ -184,7 +184,7 @@ public class Circle : MonoBehaviour
         {
             float dst = Vector2.Distance(new Vector2(position.x, position.y),
                                          new Vector2(_positions[j].x, _positions[j].y));
-            density += particleMass * Poly6Kernel(dst, smoothingRadius);
+            density += particleMass * SmoothingKernel(dst, smoothingRadius);
         }
         return density;
     }
@@ -207,9 +207,9 @@ public class Circle : MonoBehaviour
             float dst = rVec.magnitude;
             if (dst >= smoothingRadius || dst < 0.0001f) continue;
             Vector2 dir    = rVec / dst;
-            float grad     = SpikyKernelGradient(dst, smoothingRadius);
+            float grad     = SmoothingKernelDerivative(dst, smoothingRadius);
             float sharedP  = (pressureI + PressureFromDensity(_densities[j])) / (2f * _densities[j]);
-            force          -= particleMass * sharedP * grad * dir;
+            force          += particleMass * sharedP * grad * dir;
         }
         return force;
     }
@@ -230,20 +230,18 @@ public class Circle : MonoBehaviour
         }
     }
 
-    float Poly6Kernel(float dst, float radius)
+    float SmoothingKernel(float dst, float radius)
     {
         if (dst >= radius) return 0f;
-        float scale = 4f / (Mathf.PI * Mathf.Pow(radius, 8));
-        float v = radius * radius - dst * dst;
-        return scale * v * v * v;
+        float volume = Mathf.PI * Mathf.Pow(radius, 4) / 6f;
+        return (radius - dst) * (radius - dst) / volume;
     }
 
-    float SpikyKernelGradient(float dst, float radius)
+    float SmoothingKernelDerivative(float dst, float radius)
     {
         if (dst >= radius || dst < 0.0001f) return 0f;
-        float scale = -30f / (Mathf.PI * Mathf.Pow(radius, 5));
-        float v = radius - dst;
-        return scale * v * v;
+        float scale = 12f / (Mathf.PI * Mathf.Pow(radius, 4));
+        return (radius - dst) * scale;
     }
 
     void UpdatePressureColors()
@@ -262,14 +260,13 @@ public class Circle : MonoBehaviour
     Vector2 DensityGradient(Vector2 samplePos)
     {
         Vector2 gradient = Vector2.zero;
-        float scale = -24f / (Mathf.PI * Mathf.Pow(smoothingRadius, 8));
         for (int j = 0; j < numParticles; j++)
         {
             Vector2 rVec = samplePos - new Vector2(_positions[j].x, _positions[j].y);
             float dst = rVec.magnitude;
-            if (dst >= smoothingRadius) continue;
-            float v = smoothingRadius * smoothingRadius - dst * dst;
-            gradient += particleMass * scale * v * v * rVec;
+            if (dst >= smoothingRadius || dst < 0.0001f) continue;
+            float grad = SmoothingKernelDerivative(dst, smoothingRadius);
+            gradient -= particleMass * grad * rVec / dst;
         }
         return gradient;
     }
