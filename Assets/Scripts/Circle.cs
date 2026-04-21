@@ -114,7 +114,7 @@ public class Circle : MonoBehaviour
                 valid = true;
                 for (int j = 0; j < i; j++)
                 {
-                    if (Vector2.Distance(pos, new Vector2(_positions[j].x, _positions[j].y)) < particleRadius * 2f)
+                    if (Vector2.Distance(pos, new Vector2(_positions[j].x, _positions[j].y)) < particleRadius * 6f) // 3 * diameter (diameter = 2 * radius)
                     {
                         valid = false;
                         break;
