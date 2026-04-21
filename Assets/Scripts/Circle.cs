@@ -209,7 +209,7 @@ public class Circle : MonoBehaviour
     float PressureFromDensity(float density)
     {
         float ratio = density / targetDensity;
-        return Mathf.Max(0f, pressureMultiplier * (Mathf.Pow(ratio, 7) - 1f));
+        return pressureMultiplier * (Mathf.Pow(ratio, 7) - 1f);
     }
 
     Vector2 CalculatePressureForce(int i)
