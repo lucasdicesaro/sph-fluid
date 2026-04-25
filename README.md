@@ -1,0 +1,42 @@
+# Fluid 2D
+
+A 2D SPH (Smoothed Particle Hydrodynamics) fluid simulation built in Unity, based on Sebastian Lague's fluid simulation video tutorials.
+
+## What it does
+
+- Simulates fluid behavior using SPH — each particle interacts with its neighbors via density and pressure forces
+- Renders particles with GPU instancing (`DrawMeshInstancedProcedural`) for performance
+- Visualizes a pressure field in the background (blue = negative/sparse, red = positive/dense, grey = equilibrium)
+- Density gradient vector field for debugging
+
+## Requirements
+
+- Unity 2022.3 or later (URP / 2D renderer)
+
+## How to open
+
+1. Clone the repo
+2. Open **Unity Hub** → **Add project from disk** → select the repo root folder
+3. Open the `SampleScene` from `Assets/Scenes/`
+4. Press Play
+
+No manual setup needed — the scene file already has all parameters, materials, and shader assignments saved.
+
+## Inspector parameters (Circle component)
+
+| Parameter | Description |
+|---|---|
+| `numParticles` | Number of fluid particles |
+| `particleRadius` | Visual and collision radius of each particle |
+| `smoothingRadius` | SPH kernel radius — how far each particle "feels" neighbors |
+| `particleMass` | Mass per particle |
+| `targetDensity` | Rest density the fluid tries to reach |
+| `pressureMultiplier` | Stiffness — higher = stronger resistance to compression |
+| `damping` | Linear velocity damping per second |
+| `collisionDamping` | Energy retained after a wall bounce (0 = absorb all, 1 = elastic) |
+| `subSteps` | Simulation steps per frame — more = more stable at high speeds |
+| `gravity` | Downward gravity (set to 0 for top-down view) |
+
+## References
+
+- [Sebastian Lague — Coding Adventure: Simulating Fluids](https://www.youtube.com/watch?v=rSKMYc1CQHE)

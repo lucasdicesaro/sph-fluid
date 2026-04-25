@@ -515,17 +515,24 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: '::'
   instancedMaterial: {fileID: 2100000, guid: 74ff1a988b64144798c69d4fb9661731, type: 2}
-  numParticles: 300
-  particleRadius: 0.2
-  smoothingRadius: 1
+  pressureFieldMaterial: {fileID: 2100000, guid: f63fbd17989ed4a32a95a2a4ad528fcb, type: 2}
+  numParticles: 400
+  particleRadius: 0.1
+  smoothingRadius: 1.2
   particleMass: 1
-  targetDensity: 2
-  particleColor: {r: 0.4000089, g: 0.766348, b: 0.9528302, a: 1}
-  particleSpacing: 0
+  targetDensity: 2.75
   gravity: 0
   collisionDamping: 0.8
+  pressureMultiplier: 50
+  damping: 0.1
+  subSteps: 3
   vectorFieldResolution: 20
   vectorFieldScale: 0.3
+  showDensityMs: 0
+  particleColor: {r: 0, g: 0, b: 0, a: 1}
+  negativePressureColor: {r: 0, g: 0.4290328, b: 1, a: 1}
+  positivePressureColor: {r: 0.7735849, g: 0.1788003, b: 0.1788003, a: 1}
+  zeroPressureColor: {r: 0.5943396, g: 0.58592916, b: 0.58592916, a: 1}
 --- !u!4 &1253938307
 Transform:
   m_ObjectHideFlags: 0

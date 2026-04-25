@@ -6,17 +6,17 @@ public class Circle : MonoBehaviour
 {
     public Material instancedMaterial;
     public Material pressureFieldMaterial;
-    public int numParticles = 100;
+    public int numParticles = 400;
     public float particleRadius = 0.1f;
-    public float smoothingRadius = 1f;
+    public float smoothingRadius = 1.2f;
     public float particleMass = 1f;
-    public float targetDensity = 2f;
+    public float targetDensity = 2.75f;
     private Vector2 boundsSize;
 
     public float gravity = 0f;
     [Range(0f, 1f)] public float collisionDamping = 0.8f;
-    public float pressureMultiplier = 1f;
-    [Range(0f, 1f)] public float damping = 0.5f;
+    public float pressureMultiplier = 50f;
+    [Range(0f, 1f)] public float damping = 0.1f;
     public int subSteps = 3;
 
     [Header("Debug")]
@@ -25,10 +25,10 @@ public class Circle : MonoBehaviour
     public bool showDensityMs = false;
 
     [Header("Visualization")]
-    public Color particleColor = Color.white;
-    public Color negativePressureColor = Color.blue;
-    public Color positivePressureColor = Color.red;
-    public Color zeroPressureColor = Color.green;
+    public Color particleColor = Color.black;
+    public Color negativePressureColor = new Color(0f, 0.429f, 1f);
+    public Color positivePressureColor = new Color(0.774f, 0.179f, 0.179f);
+    public Color zeroPressureColor = new Color(0.594f, 0.586f, 0.586f);
 
     private Vector4[] _positions;
     private Vector2[] _velocities;
