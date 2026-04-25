@@ -2,6 +2,7 @@ using UnityEngine;
 using System.Threading.Tasks;
 using Stopwatch = System.Diagnostics.Stopwatch;
 
+[ExecuteAlways]
 public class Circle : MonoBehaviour
 {
     public Material instancedMaterial;
@@ -38,14 +39,29 @@ public class Circle : MonoBehaviour
     private ComputeBuffer _positionBuffer;
     private ComputeBuffer _colorBuffer;
     private ComputeBuffer _pressureColorBuffer;
+    private ComputeBuffer _dummyBuffer;
     private Stopwatch _stopwatch = new Stopwatch();
     private double _densityMs;
     private Mesh _quadMesh;
     private Bounds _renderBounds;
     private LineRenderer _boundsLine;
 
+    void Awake()
+    {
+        if (Application.isPlaying) return;
+        // Bind dummy buffers in edit mode to suppress "buffer not provided" shader warnings
+        _dummyBuffer?.Release();
+        _dummyBuffer = new ComputeBuffer(1, sizeof(float) * 4);
+        _dummyBuffer.SetData(new Vector4[] { Vector4.zero });
+        instancedMaterial?.SetBuffer("_Positions", _dummyBuffer);
+        instancedMaterial?.SetBuffer("_Colors", _dummyBuffer);
+        pressureFieldMaterial?.SetBuffer("_Positions", _dummyBuffer);
+        pressureFieldMaterial?.SetBuffer("_PressureColors", _dummyBuffer);
+    }
+
     void Start()
     {
+        if (!Application.isPlaying) return;
         float height = Camera.main.orthographicSize * 2f;
         float width  = height * Camera.main.aspect;
         boundsSize   = new Vector2(width, height);
@@ -332,6 +348,7 @@ public class Circle : MonoBehaviour
         _positionBuffer?.Release();
         _colorBuffer?.Release();
         _pressureColorBuffer?.Release();
+        _dummyBuffer?.Release();
     }
 
     private Mesh CreateQuadMesh()
