@@ -46,6 +46,13 @@ public class Circle : MonoBehaviour
     private Bounds _renderBounds;
     private LineRenderer _boundsLine;
 
+    // Spatial grid: dense grid over bounds, cell size = smoothingRadius, counting-sorted each step.
+    // Particles in cell c are _cellParticles[_cellStart[c] .. _cellStart[c+1]).
+    private int   _gridW, _gridH;
+    private int[] _cellStart;
+    private int[] _cellParticles;
+    private int[] _cellOf;
+
     void Awake()
     {
         if (Application.isPlaying) return;
@@ -116,6 +123,8 @@ public class Circle : MonoBehaviour
         _densities      = new float[numParticles];
         _colors         = new Color[numParticles];
         _pressureColors = new Color[numParticles];
+        _cellParticles  = new int[numParticles];
+        _cellOf         = new int[numParticles];
 
         Vector2 spawnHalf = boundsSize * 0.5f - Vector2.one * particleRadius;
         for (int i = 0; i < numParticles; i++)
@@ -152,6 +161,7 @@ public class Circle : MonoBehaviour
         _pressureColorBuffer = new ComputeBuffer(numParticles, sizeof(float) * 4);
         _positionBuffer.SetData(_positions);
         _colorBuffer.SetData(_colors);
+        BuildGrid();
     }
 
     void Update()
@@ -207,17 +217,56 @@ public class Circle : MonoBehaviour
             ResolveCollisions(ref _positions[i], ref _velocities[i]);
         });
 
+        BuildGrid();
         _positionBuffer.SetData(_positions);
+    }
+
+    void BuildGrid()
+    {
+        _gridW = Mathf.Max(1, Mathf.CeilToInt(boundsSize.x / smoothingRadius));
+        _gridH = Mathf.Max(1, Mathf.CeilToInt(boundsSize.y / smoothingRadius));
+        int cells = _gridW * _gridH;
+        if (_cellStart == null || _cellStart.Length != cells + 1) _cellStart = new int[cells + 1];
+        else System.Array.Clear(_cellStart, 0, _cellStart.Length);
+
+        // Counting sort: count -> inclusive prefix sum (cell end) -> scatter backwards (leaves cell start)
+        for (int i = 0; i < numParticles; i++)
+        {
+            _cellOf[i] = CellIndex(_positions[i].x, _positions[i].y);
+            _cellStart[_cellOf[i]]++;
+        }
+        for (int c = 1; c < cells; c++) _cellStart[c] += _cellStart[c - 1];
+        for (int i = numParticles - 1; i >= 0; i--) _cellParticles[--_cellStart[_cellOf[i]]] = i;
+        _cellStart[cells] = numParticles;
+    }
+
+    int CellIndex(float x, float y)
+    {
+        CellCoords(x, y, out int cx, out int cy);
+        return cx + cy * _gridW;
+    }
+
+    void CellCoords(float x, float y, out int cx, out int cy)
+    {
+        cx = Mathf.Clamp((int)((x + boundsSize.x * 0.5f) / smoothingRadius), 0, _gridW - 1);
+        cy = Mathf.Clamp((int)((y + boundsSize.y * 0.5f) / smoothingRadius), 0, _gridH - 1);
     }
 
     float CalculateDensity(Vector4 position)
     {
         float density = 0f;
-        for (int j = 0; j < numParticles; j++)
+        CellCoords(position.x, position.y, out int cx, out int cy);
+        for (int y = Mathf.Max(cy - 1, 0); y <= Mathf.Min(cy + 1, _gridH - 1); y++)
+        for (int x = Mathf.Max(cx - 1, 0); x <= Mathf.Min(cx + 1, _gridW - 1); x++)
         {
-            float dst = Vector2.Distance(new Vector2(position.x, position.y),
-                                         new Vector2(_positions[j].x, _positions[j].y));
-            density += particleMass * SmoothingKernel(dst, smoothingRadius);
+            int c = x + y * _gridW;
+            for (int k = _cellStart[c]; k < _cellStart[c + 1]; k++)
+            {
+                int j = _cellParticles[k];
+                float dst = Vector2.Distance(new Vector2(position.x, position.y),
+                                             new Vector2(_positions[j].x, _positions[j].y));
+                density += particleMass * SmoothingKernel(dst, smoothingRadius);
+            }
         }
         return density;
     }
@@ -232,17 +281,24 @@ public class Circle : MonoBehaviour
     {
         Vector2 force   = Vector2.zero;
         float pressureI = PressureFromDensity(_densities[i]);
-        for (int j = 0; j < numParticles; j++)
+        CellCoords(_positions[i].x, _positions[i].y, out int cx, out int cy);
+        for (int y = Mathf.Max(cy - 1, 0); y <= Mathf.Min(cy + 1, _gridH - 1); y++)
+        for (int x = Mathf.Max(cx - 1, 0); x <= Mathf.Min(cx + 1, _gridW - 1); x++)
         {
-            if (i == j) continue;
-            Vector2 rVec = new Vector2(_positions[i].x - _positions[j].x,
-                                       _positions[i].y - _positions[j].y);
-            float dst = rVec.magnitude;
-            if (dst >= smoothingRadius || dst < 0.0001f) continue;
-            Vector2 dir   = rVec / dst;
-            float grad    = SmoothingKernelDerivative(dst, smoothingRadius);
-            float sharedP = (pressureI + PressureFromDensity(_densities[j])) / (_densities[i] + _densities[j]);
-            force        += particleMass * sharedP * grad * dir;
+            int c = x + y * _gridW;
+            for (int k = _cellStart[c]; k < _cellStart[c + 1]; k++)
+            {
+                int j = _cellParticles[k];
+                if (i == j) continue;
+                Vector2 rVec = new Vector2(_positions[i].x - _positions[j].x,
+                                           _positions[i].y - _positions[j].y);
+                float dst = rVec.magnitude;
+                if (dst >= smoothingRadius || dst < 0.0001f) continue;
+                Vector2 dir   = rVec / dst;
+                float grad    = SmoothingKernelDerivative(dst, smoothingRadius);
+                float sharedP = (pressureI + PressureFromDensity(_densities[j])) / (_densities[i] + _densities[j]);
+                force        += particleMass * sharedP * grad * dir;
+            }
         }
         return force;
     }
@@ -293,13 +349,20 @@ public class Circle : MonoBehaviour
     Vector2 DensityGradient(Vector2 samplePos)
     {
         Vector2 gradient = Vector2.zero;
-        for (int j = 0; j < numParticles; j++)
+        CellCoords(samplePos.x, samplePos.y, out int cx, out int cy);
+        for (int y = Mathf.Max(cy - 1, 0); y <= Mathf.Min(cy + 1, _gridH - 1); y++)
+        for (int x = Mathf.Max(cx - 1, 0); x <= Mathf.Min(cx + 1, _gridW - 1); x++)
         {
-            Vector2 rVec = samplePos - new Vector2(_positions[j].x, _positions[j].y);
-            float dst = rVec.magnitude;
-            if (dst >= smoothingRadius || dst < 0.0001f) continue;
-            float grad = SmoothingKernelDerivative(dst, smoothingRadius);
-            gradient -= particleMass * grad * rVec / dst;
+            int c = x + y * _gridW;
+            for (int k = _cellStart[c]; k < _cellStart[c + 1]; k++)
+            {
+                int j = _cellParticles[k];
+                Vector2 rVec = samplePos - new Vector2(_positions[j].x, _positions[j].y);
+                float dst = rVec.magnitude;
+                if (dst >= smoothingRadius || dst < 0.0001f) continue;
+                float grad = SmoothingKernelDerivative(dst, smoothingRadius);
+                gradient -= particleMass * grad * rVec / dst;
+            }
         }
         return gradient;
     }
@@ -335,6 +398,21 @@ public class Circle : MonoBehaviour
                                new Vector3(back.x - perp.x, back.y - perp.y, 0), Color.yellow);
             }
         }
+    }
+
+    [ContextMenu("Validate spatial grid")]
+    void ValidateGrid()
+    {
+        // Brute-force density vs grid density; any difference means the grid misses or duplicates neighbors
+        float maxErr = 0f;
+        for (int i = 0; i < numParticles; i++)
+        {
+            float brute = 0f;
+            for (int j = 0; j < numParticles; j++)
+                brute += particleMass * SmoothingKernel(Vector2.Distance(_positions[i], _positions[j]), smoothingRadius);
+            maxErr = Mathf.Max(maxErr, Mathf.Abs(brute - CalculateDensity(_positions[i])));
+        }
+        Debug.Log($"Spatial grid {_gridW}x{_gridH}, {numParticles} particles, max density error vs brute force: {maxErr}");
     }
 
     void OnGUI()
