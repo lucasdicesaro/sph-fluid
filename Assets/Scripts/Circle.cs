@@ -34,6 +34,8 @@ public class Circle : MonoBehaviour
     public Color zeroPressureColor = new Color(0.594f, 0.586f, 0.586f);
 
     private Vector4[] _positions;
+    private Vector4[] _predicted;   // positions one lookahead step ahead; densities, forces and the grid use these
+    const float PredictionTime = 1f / 120f; // Lague's fixed lookahead, independent of dt
     private Vector2[] _velocities;
     private float[]   _densities;
     private Color[]   _colors;
@@ -121,6 +123,7 @@ public class Circle : MonoBehaviour
     void InitializeParticles()
     {
         _positions      = new Vector4[numParticles];
+        _predicted      = new Vector4[numParticles];
         _velocities     = new Vector2[numParticles];
         _densities      = new float[numParticles];
         _colors         = new Color[numParticles];
@@ -139,6 +142,7 @@ public class Circle : MonoBehaviour
         {
             Vector2 pos = origin + new Vector2(i % cols, i / cols) * spacing;
             _positions[i]  = new Vector4(pos.x, pos.y, 0f, 0f);
+            _predicted[i]  = _positions[i];
             _velocities[i] = Vector2.zero;
             _colors[i]     = particleColor;
         }
@@ -184,14 +188,19 @@ public class Circle : MonoBehaviour
 
     void SimulationStep(float dt)
     {
-        // Pass 1: apply gravity + calculate densities
+        // Pass 1: apply gravity + predict where each particle will be
         Parallel.For(0, numParticles, i =>
         {
             _velocities[i] += Vector2.down * gravity * dt;
-            _densities[i]   = CalculateDensity(_positions[i]);
+            _predicted[i].x = _positions[i].x + _velocities[i].x * PredictionTime;
+            _predicted[i].y = _positions[i].y + _velocities[i].y * PredictionTime;
         });
+        BuildGrid();
 
-        // Pass 2: calculate pressure force + apply acceleration + damping
+        // Pass 2: densities from predicted positions
+        Parallel.For(0, numParticles, i => _densities[i] = CalculateDensity(_predicted[i]));
+
+        // Pass 3: pressure force (from predicted positions) + apply acceleration + damping
         Parallel.For(0, numParticles, i =>
         {
             Vector2 pressureForce        = CalculatePressureForce(i);
@@ -199,7 +208,7 @@ public class Circle : MonoBehaviour
             _velocities[i]              *= Mathf.Pow(1f - damping, dt);
         });
 
-        // Pass 3: integrate positions + resolve bounds collisions
+        // Pass 4: integrate positions + resolve bounds collisions
         Parallel.For(0, numParticles, i =>
         {
             _positions[i].x += _velocities[i].x * dt;
@@ -207,7 +216,6 @@ public class Circle : MonoBehaviour
             ResolveCollisions(ref _positions[i], ref _velocities[i]);
         });
 
-        BuildGrid();
         _positionBuffer.SetData(_positions);
     }
 
@@ -222,7 +230,7 @@ public class Circle : MonoBehaviour
         // Counting sort: count -> inclusive prefix sum (cell end) -> scatter backwards (leaves cell start)
         for (int i = 0; i < numParticles; i++)
         {
-            _cellOf[i] = CellIndex(_positions[i].x, _positions[i].y);
+            _cellOf[i] = CellIndex(_predicted[i].x, _predicted[i].y);
             _cellStart[_cellOf[i]]++;
         }
         for (int c = 1; c < cells; c++) _cellStart[c] += _cellStart[c - 1];
@@ -254,7 +262,7 @@ public class Circle : MonoBehaviour
             {
                 int j = _cellParticles[k];
                 float dst = Vector2.Distance(new Vector2(position.x, position.y),
-                                             new Vector2(_positions[j].x, _positions[j].y));
+                                             new Vector2(_predicted[j].x, _predicted[j].y));
                 density += particleMass * SmoothingKernel(dst, smoothingRadius);
             }
         }
@@ -270,7 +278,7 @@ public class Circle : MonoBehaviour
     {
         Vector2 force   = Vector2.zero;
         float pressureI = PressureFromDensity(_densities[i]);
-        CellCoords(_positions[i].x, _positions[i].y, out int cx, out int cy);
+        CellCoords(_predicted[i].x, _predicted[i].y, out int cx, out int cy);
         for (int y = Mathf.Max(cy - 1, 0); y <= Mathf.Min(cy + 1, _gridH - 1); y++)
         for (int x = Mathf.Max(cx - 1, 0); x <= Mathf.Min(cx + 1, _gridW - 1); x++)
         {
@@ -279,8 +287,8 @@ public class Circle : MonoBehaviour
             {
                 int j = _cellParticles[k];
                 if (i == j) continue;
-                Vector2 rVec = new Vector2(_positions[i].x - _positions[j].x,
-                                           _positions[i].y - _positions[j].y);
+                Vector2 rVec = new Vector2(_predicted[i].x - _predicted[j].x,
+                                           _predicted[i].y - _predicted[j].y);
                 float dst = rVec.magnitude;
                 if (dst >= smoothingRadius || dst < 0.0001f) continue;
                 Vector2 dir   = rVec / dst;
@@ -346,7 +354,7 @@ public class Circle : MonoBehaviour
             for (int k = _cellStart[c]; k < _cellStart[c + 1]; k++)
             {
                 int j = _cellParticles[k];
-                Vector2 rVec = samplePos - new Vector2(_positions[j].x, _positions[j].y);
+                Vector2 rVec = samplePos - new Vector2(_predicted[j].x, _predicted[j].y);
                 float dst = rVec.magnitude;
                 if (dst >= smoothingRadius || dst < 0.0001f) continue;
                 float grad = SmoothingKernelDerivative(dst, smoothingRadius);
@@ -398,8 +406,8 @@ public class Circle : MonoBehaviour
         {
             float brute = 0f;
             for (int j = 0; j < numParticles; j++)
-                brute += particleMass * SmoothingKernel(Vector2.Distance(_positions[i], _positions[j]), smoothingRadius);
-            maxErr = Mathf.Max(maxErr, Mathf.Abs(brute - CalculateDensity(_positions[i])));
+                brute += particleMass * SmoothingKernel(Vector2.Distance(_predicted[i], _predicted[j]), smoothingRadius);
+            maxErr = Mathf.Max(maxErr, Mathf.Abs(brute - CalculateDensity(_predicted[i])));
         }
         Debug.Log($"Spatial grid {_gridW}x{_gridH}, {numParticles} particles, max density error vs brute force: {maxErr}");
     }
