@@ -22,6 +22,14 @@ A 2D SPH (Smoothed Particle Hydrodynamics) fluid simulation built in Unity, base
 
 No manual setup needed — the scene file already has all parameters, materials, and shader assignments saved.
 
+## Controls (Play mode)
+
+| Key | Action |
+|---|---|
+| `R` | Restart the simulation (starts paused) |
+| `Space` | Run / pause — the simulation starts paused |
+| `→` | Advance one frame while paused |
+
 ## Inspector parameters (Circle component)
 
 | Parameter | Description |

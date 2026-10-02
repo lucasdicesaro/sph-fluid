@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.InputSystem;
 using System.Threading.Tasks;
 using Stopwatch = System.Diagnostics.Stopwatch;
 
@@ -58,6 +59,7 @@ public class Circle : MonoBehaviour
     private ComputeBuffer _pressureColorBuffer;
     private ComputeBuffer _dummyBuffer;
     private Stopwatch _stopwatch = new Stopwatch();
+    private bool _paused = true; // start paused; Space to run
     private double _densityMs;
     private Mesh _quadMesh;
     private Bounds _renderBounds;
@@ -173,12 +175,25 @@ public class Circle : MonoBehaviour
     {
         if (instancedMaterial == null || _positionBuffer == null) return;
 
-        _stopwatch.Restart();
-        float dt = Time.deltaTime / subSteps;
-        for (int step = 0; step < subSteps; step++)
-            SimulationStep(dt);
-        _stopwatch.Stop();
-        _densityMs = _stopwatch.Elapsed.TotalMilliseconds;
+        // Controls: R restart, Space pause/resume, Right arrow single step while paused
+        Keyboard kb = Keyboard.current;
+        bool stepOnce = false;
+        if (kb != null)
+        {
+            if (kb.rKey.wasPressedThisFrame) { InitializeParticles(); _paused = true; }
+            if (kb.spaceKey.wasPressedThisFrame) _paused = !_paused;
+            stepOnce = _paused && kb.rightArrowKey.wasPressedThisFrame;
+        }
+
+        if (!_paused || stepOnce)
+        {
+            _stopwatch.Restart();
+            float dt = (_paused ? 1f / 60f : Time.deltaTime) / subSteps; // fixed 60 Hz frame when stepping
+            for (int step = 0; step < subSteps; step++)
+                SimulationStep(dt);
+            _stopwatch.Stop();
+            _densityMs = _stopwatch.Elapsed.TotalMilliseconds;
+        }
 
         UpdatePressureColors();
         UpdateSpeedColors();
@@ -433,6 +448,7 @@ public class Circle : MonoBehaviour
 
     void OnGUI()
     {
+        if (_paused) GUI.Label(new Rect(10, 30, 400, 20), "PAUSED  (Space: run, Right arrow: step, R: restart)");
         if (!showDensityMs) return;
         GUI.Label(new Rect(10, 10, 300, 20), $"Density: {_densityMs:F3} ms");
     }
