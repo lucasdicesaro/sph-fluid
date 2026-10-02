@@ -42,8 +42,8 @@ Material:
     m_Ints: []
     m_Floats:
     - _EnableExternalAlpha: 0
-    - _ParticleRadius: 0.1
-    - _SmoothingRadius: 1.2
+    - _ParticleRadius: 0.05
+    - _SmoothingRadius: 0.3
     - _ZWrite: 0
     m_Colors:
     - _Color: {r: 1, g: 1, b: 1, a: 1}

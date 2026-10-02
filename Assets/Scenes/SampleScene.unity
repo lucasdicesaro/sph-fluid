@@ -516,14 +516,14 @@ MonoBehaviour:
   m_EditorClassIdentifier: '::'
   instancedMaterial: {fileID: 2100000, guid: 74ff1a988b64144798c69d4fb9661731, type: 2}
   pressureFieldMaterial: {fileID: 2100000, guid: f63fbd17989ed4a32a95a2a4ad528fcb, type: 2}
-  numParticles: 400
-  particleRadius: 0.1
-  smoothingRadius: 1.2
+  numParticles: 3000
+  particleRadius: 0.05
+  smoothingRadius: 0.3
   particleMass: 1
-  targetDensity: 2.75
+  targetDensity: 1.5
   gravity: 0
-  collisionDamping: 0.8
-  pressureMultiplier: 50
+  collisionDamping: 0.95
+  pressureMultiplier: 0.1
   damping: 0.1
   subSteps: 3
   vectorFieldResolution: 20

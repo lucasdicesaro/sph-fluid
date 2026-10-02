@@ -28,10 +28,11 @@ No manual setup needed — the scene file already has all parameters, materials,
 |---|---|
 | `numParticles` | Number of fluid particles |
 | `particleRadius` | Visual and collision radius of each particle |
+| `spawnGap` | Gap between neighbouring particles in the initial block |
 | `smoothingRadius` | SPH kernel radius — how far each particle "feels" neighbors |
 | `particleMass` | Mass per particle |
 | `targetDensity` | Rest density the fluid tries to reach |
-| `pressureMultiplier` | Stiffness — higher = stronger resistance to compression |
+| `pressureMultiplier` | Stiffness — pressure = multiplier × (density − target), higher = stronger resistance to compression |
 | `damping` | Linear velocity damping per second |
 | `collisionDamping` | Energy retained after a wall bounce (0 = absorb all, 1 = elastic) |
 | `subSteps` | Simulation steps per frame — more = more stable at high speeds |

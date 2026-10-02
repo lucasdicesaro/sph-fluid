@@ -7,16 +7,18 @@ public class Circle : MonoBehaviour
 {
     public Material instancedMaterial;
     public Material pressureFieldMaterial;
-    public int numParticles = 400;
-    public float particleRadius = 0.1f;
-    public float smoothingRadius = 1.2f;
+    public int numParticles = 3000;
+    public float particleRadius = 0.05f;
+    [Tooltip("Gap between neighbouring particles in the spawn block")]
+    public float spawnGap = 0.02f;
+    public float smoothingRadius = 0.3f;
     public float particleMass = 1f;
-    public float targetDensity = 2.75f;
+    public float targetDensity = 1.5f;
     private Vector2 boundsSize;
 
     public float gravity = 0f;
-    [Range(0f, 1f)] public float collisionDamping = 0.8f;
-    public float pressureMultiplier = 50f;
+    [Range(0f, 1f)] public float collisionDamping = 0.95f;
+    public float pressureMultiplier = 0.1f;
     [Range(0f, 1f)] public float damping = 0.1f;
     public int subSteps = 3;
 
@@ -126,28 +128,16 @@ public class Circle : MonoBehaviour
         _cellParticles  = new int[numParticles];
         _cellOf         = new int[numParticles];
 
-        Vector2 spawnHalf = boundsSize * 0.5f - Vector2.one * particleRadius;
+        // Block of particles centred on screen, spaced one diameter plus spawnGap apart, same aspect as the bounds
+        float spacing = particleRadius * 2f + spawnGap;
+        int   cols    = Mathf.CeilToInt(Mathf.Sqrt(numParticles * boundsSize.x / boundsSize.y));
+        int   rows    = Mathf.CeilToInt((float)numParticles / cols);
+        if (cols * spacing > boundsSize.x || rows * spacing > boundsSize.y)
+            Debug.LogWarning($"Spawn block {cols}x{rows} ({cols * spacing:F1}x{rows * spacing:F1}) exceeds bounds {boundsSize.x:F1}x{boundsSize.y:F1}; reduce numParticles or spawnGap");
+        Vector2 origin = new Vector2(-(cols - 1) * spacing * 0.5f, -(rows - 1) * spacing * 0.5f);
         for (int i = 0; i < numParticles; i++)
         {
-            Vector2 pos;
-            int attempts = 0;
-            bool valid;
-            do
-            {
-                pos   = new Vector2(Random.Range(-spawnHalf.x, spawnHalf.x),
-                                    Random.Range(-spawnHalf.y, spawnHalf.y));
-                valid = true;
-                for (int j = 0; j < i; j++)
-                {
-                    if (Vector2.Distance(pos, new Vector2(_positions[j].x, _positions[j].y)) < particleRadius * 6f) // 3 * diameter (diameter = 2 * radius)
-                    {
-                        valid = false;
-                        break;
-                    }
-                }
-                attempts++;
-            } while (!valid && attempts < 100);
-
+            Vector2 pos = origin + new Vector2(i % cols, i / cols) * spacing;
             _positions[i]  = new Vector4(pos.x, pos.y, 0f, 0f);
             _velocities[i] = Vector2.zero;
             _colors[i]     = particleColor;
@@ -273,8 +263,7 @@ public class Circle : MonoBehaviour
 
     float PressureFromDensity(float density)
     {
-        float ratio = density / targetDensity;
-        return pressureMultiplier * (Mathf.Pow(ratio, 7) - 1f);
+        return pressureMultiplier * (density - targetDensity);
     }
 
     Vector2 CalculatePressureForce(int i)
