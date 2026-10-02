@@ -18,7 +18,7 @@ public class Circle : MonoBehaviour
 
     public float gravity = 0f;
     [Range(0f, 1f)] public float collisionDamping = 0.95f;
-    public float pressureMultiplier = 0.1f;
+    public float pressureMultiplier = 4f;
     [Range(0f, 1f)] public float damping = 0.1f;
     public int subSteps = 3;
 

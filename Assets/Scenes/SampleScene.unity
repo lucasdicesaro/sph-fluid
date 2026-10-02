@@ -523,7 +523,7 @@ MonoBehaviour:
   targetDensity: 1.5
   gravity: 0
   collisionDamping: 0.95
-  pressureMultiplier: 0.1
+  pressureMultiplier: 4
   damping: 0.1
   subSteps: 3
   vectorFieldResolution: 20
