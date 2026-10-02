@@ -28,7 +28,20 @@ public class Circle : MonoBehaviour
     public bool showDensityMs = false;
 
     [Header("Visualization")]
-    public Color particleColor = Color.black;
+    [Tooltip("Particle colour by speed: left = stationary, right = maxSpeed")]
+    public Gradient speedGradient = new Gradient
+    {
+        // Heat map: blue -> cyan -> yellow -> red; interpolation fills in the greens and oranges between the 4 markers
+        colorKeys = new[]
+        {
+            new GradientColorKey(Color.blue,   0f),
+            new GradientColorKey(Color.cyan,   0.33f),
+            new GradientColorKey(Color.yellow, 0.66f),
+            new GradientColorKey(Color.red,    1f)
+        },
+        alphaKeys = new[] { new GradientAlphaKey(1f, 0f), new GradientAlphaKey(1f, 1f) }
+    };
+    public float maxSpeed = 5f;
     public Color negativePressureColor = new Color(0f, 0.429f, 1f);
     public Color positivePressureColor = new Color(0.774f, 0.179f, 0.179f);
     public Color zeroPressureColor = new Color(0.594f, 0.586f, 0.586f);
@@ -144,7 +157,6 @@ public class Circle : MonoBehaviour
             _positions[i]  = new Vector4(pos.x, pos.y, 0f, 0f);
             _predicted[i]  = _positions[i];
             _velocities[i] = Vector2.zero;
-            _colors[i]     = particleColor;
         }
 
         _positionBuffer?.Release();
@@ -154,7 +166,6 @@ public class Circle : MonoBehaviour
         _colorBuffer         = new ComputeBuffer(numParticles, sizeof(float) * 4);
         _pressureColorBuffer = new ComputeBuffer(numParticles, sizeof(float) * 4);
         _positionBuffer.SetData(_positions);
-        _colorBuffer.SetData(_colors);
         BuildGrid();
     }
 
@@ -170,6 +181,7 @@ public class Circle : MonoBehaviour
         _densityMs = _stopwatch.Elapsed.TotalMilliseconds;
 
         UpdatePressureColors();
+        UpdateSpeedColors();
         DrawVectorField();
 
         if (pressureFieldMaterial != null)
@@ -341,6 +353,13 @@ public class Circle : MonoBehaviour
                 : Color.Lerp(zeroPressureColor, negativePressureColor, -t);
         }
         _pressureColorBuffer.SetData(_pressureColors);
+    }
+
+    void UpdateSpeedColors()
+    {
+        for (int i = 0; i < numParticles; i++)
+            _colors[i] = speedGradient.Evaluate(Mathf.Clamp01(_velocities[i].magnitude / maxSpeed));
+        _colorBuffer.SetData(_colors);
     }
 
     Vector2 DensityGradient(Vector2 samplePos)

@@ -37,6 +37,8 @@ No manual setup needed — the scene file already has all parameters, materials,
 | `collisionDamping` | Energy retained after a wall bounce (0 = absorb all, 1 = elastic) |
 | `subSteps` | Simulation steps per frame — more = more stable at high speeds |
 | `gravity` | Downward gravity (set to 0 for top-down view) |
+| `speedGradient` | Particle colour by speed, slow on the left, fast on the right (default heat map: blue → cyan → yellow → red) |
+| `maxSpeed` | Speed that maps to the right end of the gradient |
 
 ## References
 
