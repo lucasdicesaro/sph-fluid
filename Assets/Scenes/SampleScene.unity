@@ -518,14 +518,14 @@ MonoBehaviour:
   pressureFieldMaterial: {fileID: 2100000, guid: f63fbd17989ed4a32a95a2a4ad528fcb, type: 2}
   numParticles: 3000
   particleRadius: 0.05
-  smoothingRadius: 0.3
+  smoothingRadius: 0.35
   particleMass: 1
-  targetDensity: 1.5
-  gravity: 0
+  targetDensity: 55
+  gravity: 10
   collisionDamping: 0.95
-  pressureMultiplier: 4
+  pressureMultiplier: 500
   damping: 0.1
-  subSteps: 3
+  subSteps: 5
   vectorFieldResolution: 20
   vectorFieldScale: 0.3
   showDensityMs: 0

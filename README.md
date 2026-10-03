@@ -41,12 +41,12 @@ No manual setup needed — the scene file already has all parameters, materials,
 | `spawnGap` | Gap between neighbouring particles in the initial block |
 | `smoothingRadius` | SPH kernel radius — how far each particle "feels" neighbors |
 | `particleMass` | Mass per particle |
-| `targetDensity` | Rest density the fluid tries to reach |
+| `targetDensity` | Rest density the fluid tries to reach. For a liquid it must sit near the surface density, which at `smoothingRadius` 0.35 is ~55; a lone particle already reads 6/(π·r²) ≈ 15.6 from itself |
 | `pressureMultiplier` | Stiffness — pressure = multiplier × (density − target), higher = stronger resistance to compression |
 | `damping` | Linear velocity damping per second |
 | `collisionDamping` | Energy retained after a wall bounce (0 = absorb all, 1 = elastic) |
 | `subSteps` | Simulation steps per frame — more = more stable at high speeds |
-| `gravity` | Downward gravity (set to 0 for top-down view) |
+| `gravity` | Downward gravity (default 10; set to 0 for top-down view) |
 | `interactionRadius` | Radius around the cursor affected by mouse pull/push |
 | `interactionStrength` | Strength of the mouse pull/push |
 | `speedGradient` | Particle colour by speed, slow on the left, fast on the right (default heat map: blue → cyan → yellow → red) |

@@ -12,16 +12,16 @@ public class Circle : MonoBehaviour
     public float particleRadius = 0.05f;
     [Tooltip("Gap between neighbouring particles in the spawn block")]
     public float spawnGap = 0.02f;
-    public float smoothingRadius = 0.3f;
+    public float smoothingRadius = 0.35f;
     public float particleMass = 1f;
-    public float targetDensity = 1.5f;
+    public float targetDensity = 55f;
     private Vector2 boundsSize;
 
-    public float gravity = 0f;
+    public float gravity = 10f;
     [Range(0f, 1f)] public float collisionDamping = 0.95f;
-    public float pressureMultiplier = 4f;
+    public float pressureMultiplier = 500f;
     [Range(0f, 1f)] public float damping = 0.1f;
-    public int subSteps = 3;
+    public int subSteps = 5;
 
     [Header("Interaction")]
     [Tooltip("Radius around the cursor that is affected")]
@@ -32,6 +32,7 @@ public class Circle : MonoBehaviour
     [Header("Debug")]
     public int vectorFieldResolution = 20;
     public float vectorFieldScale = 0.3f;
+    [Tooltip("Show sim timing, bounds and the density under the cursor")]
     public bool showDensityMs = false;
 
     [Header("Visualization")]
@@ -509,7 +510,14 @@ public class Circle : MonoBehaviour
     {
         if (_paused) GUI.Label(new Rect(10, 30, 400, 20), "PAUSED  (Space: run, Right arrow: step, R: restart)");
         if (!showDensityMs) return;
-        GUI.Label(new Rect(10, 10, 300, 20), $"Density: {_densityMs:F3} ms");
+        GUI.Label(new Rect(10, 10, 400, 20), $"Sim: {_densityMs:F3} ms   Bounds: {boundsSize.x:F1} x {boundsSize.y:F1}   Particles: {numParticles}");
+        if (Mouse.current != null && _predicted != null)
+        {
+            Vector2 screen = Mouse.current.position.ReadValue();
+            Vector2 world  = Camera.main.ScreenToWorldPoint(screen);
+            // GUI y runs top-down, mouse y bottom-up
+            GUI.Label(new Rect(screen.x + 12, Screen.height - screen.y - 10, 300, 20), $"density {CalculateDensity(world):F2}");
+        }
     }
 
     void OnDestroy()
