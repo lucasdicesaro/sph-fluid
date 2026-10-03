@@ -23,6 +23,12 @@ public class Circle : MonoBehaviour
     [Range(0f, 1f)] public float damping = 0.1f;
     public int subSteps = 3;
 
+    [Header("Interaction")]
+    [Tooltip("Radius around the cursor that is affected")]
+    public float interactionRadius = 2f;
+    [Tooltip("Left click pulls particles in, right click pushes them away")]
+    public float interactionStrength = 10f;
+
     [Header("Debug")]
     public int vectorFieldResolution = 20;
     public float vectorFieldScale = 0.3f;
@@ -60,10 +66,14 @@ public class Circle : MonoBehaviour
     private ComputeBuffer _dummyBuffer;
     private Stopwatch _stopwatch = new Stopwatch();
     private bool _paused = true; // start paused; Space to run
+    private Vector2 _interactionPos;
+    private float   _interactionSign; // +1 pull, -1 push, 0 none; read from the mouse once per frame
     private double _densityMs;
     private Mesh _quadMesh;
     private Bounds _renderBounds;
     private LineRenderer _boundsLine;
+    private LineRenderer _interactionCircle;
+    const int InteractionCircleSegments = 64;
 
     // Spatial grid: dense grid over bounds, cell size = smoothingRadius, counting-sorted each step.
     // Particles in cell c are _cellParticles[_cellStart[c] .. _cellStart[c+1]).
@@ -95,29 +105,49 @@ public class Circle : MonoBehaviour
         _quadMesh = CreateQuadMesh();
         _renderBounds = new Bounds(Vector3.zero, new Vector3(boundsSize.x + smoothingRadius * 2f, boundsSize.y + smoothingRadius * 2f, 1f));
         SetupBoundsLine();
+        _interactionCircle = CreateLine("InteractionCircle", Color.green, InteractionCircleSegments, loop: true);
+        _interactionCircle.enabled = false;
         InitializeParticles();
     }
 
     void SetupBoundsLine()
     {
-        GameObject boundsObj = GameObject.Find("BoundsLine");
-        if (boundsObj == null)
-            boundsObj = new GameObject("BoundsLine");
-
-        boundsObj.transform.position = Vector3.zero;
-        _boundsLine = boundsObj.GetComponent<LineRenderer>();
-        if (_boundsLine == null)
-            _boundsLine = boundsObj.AddComponent<LineRenderer>();
-
-        _boundsLine.positionCount = 5;
-        _boundsLine.loop = false;
-        _boundsLine.widthMultiplier = 0.05f;
-        _boundsLine.material = new Material(Shader.Find("Sprites/Default"));
-        _boundsLine.startColor = Color.green;
-        _boundsLine.endColor = Color.green;
-        _boundsLine.useWorldSpace = true;
-
+        _boundsLine = CreateLine("BoundsLine", Color.green, 5, loop: false);
         DrawBoundsLine();
+    }
+
+    LineRenderer CreateLine(string name, Color color, int positionCount, bool loop)
+    {
+        GameObject obj = GameObject.Find(name);
+        if (obj == null) obj = new GameObject(name);
+        obj.transform.position = Vector3.zero;
+        LineRenderer line = obj.GetComponent<LineRenderer>();
+        if (line == null) line = obj.AddComponent<LineRenderer>();
+        line.positionCount    = positionCount;
+        line.loop             = loop;
+        line.widthMultiplier  = 0.05f;
+        line.material         = new Material(Shader.Find("Sprites/Default"));
+        line.startColor       = color;
+        line.endColor         = color;
+        line.useWorldSpace    = true;
+        return line;
+    }
+
+    void DrawInteractionCircle()
+    {
+        if (_interactionCircle == null) return;
+        _interactionCircle.enabled = _interactionSign != 0f;
+        if (!_interactionCircle.enabled) return;
+
+        Color color = _interactionSign > 0f ? Color.green : Color.red;
+        _interactionCircle.startColor = color;
+        _interactionCircle.endColor   = color;
+        for (int k = 0; k < InteractionCircleSegments; k++)
+        {
+            float a = k * 2f * Mathf.PI / InteractionCircleSegments;
+            _interactionCircle.SetPosition(k, new Vector3(_interactionPos.x + Mathf.Cos(a) * interactionRadius,
+                                                          _interactionPos.y + Mathf.Sin(a) * interactionRadius, 0f));
+        }
     }
 
     void DrawBoundsLine()
@@ -185,6 +215,9 @@ public class Circle : MonoBehaviour
             stepOnce = _paused && kb.rightArrowKey.wasPressedThisFrame;
         }
 
+        ReadMouse();
+        DrawInteractionCircle();
+
         if (!_paused || stepOnce)
         {
             _stopwatch.Restart();
@@ -213,6 +246,30 @@ public class Circle : MonoBehaviour
         Graphics.DrawMeshInstancedProcedural(_quadMesh, 0, instancedMaterial, _renderBounds, numParticles);
     }
 
+    void ReadMouse()
+    {
+        Mouse mouse = Mouse.current;
+        _interactionSign = 0f;
+        if (mouse == null) return;
+        if      (mouse.leftButton.isPressed)  _interactionSign =  1f;
+        else if (mouse.rightButton.isPressed) _interactionSign = -1f;
+        if (_interactionSign != 0f)
+            _interactionPos = Camera.main.ScreenToWorldPoint(mouse.position.ReadValue());
+    }
+
+    // Lague's interaction force: pull toward (or push away from) the cursor, fading to zero at interactionRadius,
+    // with a damping term so particles near the cursor settle instead of overshooting
+    Vector2 InteractionForce(int i)
+    {
+        Vector2 offset = _interactionPos - new Vector2(_positions[i].x, _positions[i].y);
+        float sqrDst = offset.sqrMagnitude;
+        if (sqrDst >= interactionRadius * interactionRadius) return Vector2.zero;
+        float dst = Mathf.Sqrt(sqrDst);
+        Vector2 dir = dst <= 0.0001f ? Vector2.zero : offset / dst;
+        float centreT = 1f - dst / interactionRadius;
+        return (dir * interactionStrength * _interactionSign - _velocities[i]) * centreT;
+    }
+
     void SimulationStep(float dt)
     {
         // Pass 1: apply gravity + predict where each particle will be
@@ -232,6 +289,7 @@ public class Circle : MonoBehaviour
         {
             Vector2 pressureForce        = CalculatePressureForce(i);
             _velocities[i]              += pressureForce / _densities[i] * dt;
+            if (_interactionSign != 0f) _velocities[i] += InteractionForce(i) * dt;
             _velocities[i]              *= Mathf.Pow(1f - damping, dt);
         });
 
