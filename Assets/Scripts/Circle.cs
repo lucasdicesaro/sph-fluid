@@ -17,21 +17,21 @@ public class Circle : MonoBehaviour
     public float targetDensity = 55f;
     private Vector2 boundsSize;
 
-    public float gravity = 10f;
+    public float gravity = 12f;
     [Range(0f, 1f)] public float collisionDamping = 0.95f;
     public float pressureMultiplier = 500f;
     [Tooltip("Repulsion from a sharper 'near density' with no target: stops particles pairing up or clumping")]
     public float nearPressureMultiplier = 5f;
     [Range(0f, 1f)] public float damping = 0f;
     [Tooltip("Pulls each particle's velocity toward its neighbours'. Damps relative motion only, so the fluid flows coherently")]
-    public float viscosityStrength = 0.06f;
-    public int subSteps = 5;
+    public float viscosityStrength = 0.03f;
+    public int subSteps = 3;
 
     [Header("Interaction")]
     [Tooltip("Radius around the cursor that is affected")]
-    public float interactionRadius = 3f;
+    public float interactionRadius = 2f;
     [Tooltip("Left click pulls particles in, right click pushes them away")]
-    public float interactionStrength = 200f;
+    public float interactionStrength = 90f;
 
     [Header("Debug")]
     public int vectorFieldResolution = 20;

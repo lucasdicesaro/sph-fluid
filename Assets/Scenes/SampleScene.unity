@@ -521,15 +521,15 @@ MonoBehaviour:
   smoothingRadius: 0.35
   particleMass: 1
   targetDensity: 55
-  gravity: 10
+  gravity: 12
   collisionDamping: 0.95
   pressureMultiplier: 500
   nearPressureMultiplier: 5
   damping: 0
-  subSteps: 5
-  viscosityStrength: 0.06
-  interactionRadius: 3
-  interactionStrength: 200
+  subSteps: 3
+  viscosityStrength: 0.03
+  interactionRadius: 2
+  interactionStrength: 90
   vectorFieldResolution: 20
   vectorFieldScale: 0.3
   showDensityMs: 0
