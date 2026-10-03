@@ -176,9 +176,9 @@ public class Circle : MonoBehaviour
         _cellParticles  = new int[numParticles];
         _cellOf         = new int[numParticles];
 
-        // Block of particles centred on screen, spaced one diameter plus spawnGap apart, same aspect as the bounds
+        // Square block of particles centred on screen, spaced one diameter plus spawnGap apart
         float spacing = particleRadius * 2f + spawnGap;
-        int   cols    = Mathf.CeilToInt(Mathf.Sqrt(numParticles * boundsSize.x / boundsSize.y));
+        int   cols    = Mathf.CeilToInt(Mathf.Sqrt(numParticles));
         int   rows    = Mathf.CeilToInt((float)numParticles / cols);
         if (cols * spacing > boundsSize.x || rows * spacing > boundsSize.y)
             Debug.LogWarning($"Spawn block {cols}x{rows} ({cols * spacing:F1}x{rows * spacing:F1}) exceeds bounds {boundsSize.x:F1}x{boundsSize.y:F1}; reduce numParticles or spawnGap");
