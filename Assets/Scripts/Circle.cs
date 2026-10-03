@@ -8,7 +8,7 @@ public class Circle : MonoBehaviour
 {
     public Material instancedMaterial;
     public Material pressureFieldMaterial;
-    public int numParticles = 3000;
+    public int numParticles = 4032;
     public float particleRadius = 0.05f;
     [Tooltip("Gap between neighbouring particles in the spawn block")]
     public float spawnGap = 0.02f;
@@ -25,9 +25,9 @@ public class Circle : MonoBehaviour
 
     [Header("Interaction")]
     [Tooltip("Radius around the cursor that is affected")]
-    public float interactionRadius = 2f;
+    public float interactionRadius = 3f;
     [Tooltip("Left click pulls particles in, right click pushes them away")]
-    public float interactionStrength = 10f;
+    public float interactionStrength = 200f;
 
     [Header("Debug")]
     public int vectorFieldResolution = 20;
@@ -50,9 +50,9 @@ public class Circle : MonoBehaviour
         alphaKeys = new[] { new GradientAlphaKey(1f, 0f), new GradientAlphaKey(1f, 1f) }
     };
     public float maxSpeed = 5f;
-    public Color negativePressureColor = new Color(0f, 0.429f, 1f);
-    public Color positivePressureColor = new Color(0.774f, 0.179f, 0.179f);
-    public Color zeroPressureColor = new Color(0.594f, 0.586f, 0.586f);
+    public Color negativePressureColor = Color.black;
+    public Color positivePressureColor = Color.black;
+    public Color zeroPressureColor = Color.black;
 
     private Vector4[] _positions;
     private Vector4[] _predicted;   // positions one lookahead step ahead; densities, forces and the grid use these
@@ -259,7 +259,8 @@ public class Circle : MonoBehaviour
     }
 
     // Lague's interaction force: pull toward (or push away from) the cursor, fading to zero at interactionRadius,
-    // with a damping term so particles near the cursor settle instead of overshooting
+    // with a damping term so particles near the cursor settle instead of overshooting, and gravity cancelled inside
+    // the ring so held water doesn't sag. To pick up a ball: click inside the pool, then drag out slowly.
     Vector2 InteractionForce(int i)
     {
         Vector2 offset = _interactionPos - new Vector2(_positions[i].x, _positions[i].y);
@@ -268,7 +269,9 @@ public class Circle : MonoBehaviour
         float dst = Mathf.Sqrt(sqrDst);
         Vector2 dir = dst <= 0.0001f ? Vector2.zero : offset / dst;
         float centreT = 1f - dst / interactionRadius;
-        return (dir * interactionStrength * _interactionSign - _velocities[i]) * centreT;
+        Vector2 force = (dir * interactionStrength * _interactionSign - _velocities[i]) * centreT;
+        if (_interactionSign > 0f) force += Vector2.up * gravity * centreT * Mathf.Clamp01(interactionStrength / 10f);
+        return force;
     }
 
     void SimulationStep(float dt)

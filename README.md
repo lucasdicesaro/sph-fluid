@@ -29,7 +29,7 @@ No manual setup needed — the scene file already has all parameters, materials,
 | `R` | Restart the simulation (starts paused) |
 | `Space` | Run / pause — the simulation starts paused |
 | `→` | Advance one frame while paused |
-| Left click / drag | Pull nearby particles toward the cursor |
+| Left click / drag | Pull nearby particles toward the cursor. To pick up a ball of water, click inside the pool and drag out slowly |
 | Right click / drag (two-finger click on a trackpad) | Push nearby particles away |
 
 ## Inspector parameters (Circle component)
