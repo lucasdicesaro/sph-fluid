@@ -21,7 +21,7 @@ public class Circle : MonoBehaviour
     [Range(0f, 1f)] public float collisionDamping = 0.95f;
     public float pressureMultiplier = 500f;
     [Tooltip("Repulsion from a sharper 'near density' with no target: stops particles pairing up or clumping")]
-    public float nearPressureMultiplier = 18f;
+    public float nearPressureMultiplier = 5f;
     [Range(0f, 1f)] public float damping = 0f;
     [Tooltip("Pulls each particle's velocity toward its neighbours'. Damps relative motion only, so the fluid flows coherently")]
     public float viscosityStrength = 0.06f;

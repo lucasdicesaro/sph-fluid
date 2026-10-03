@@ -524,7 +524,7 @@ MonoBehaviour:
   gravity: 10
   collisionDamping: 0.95
   pressureMultiplier: 500
-  nearPressureMultiplier: 18
+  nearPressureMultiplier: 5
   damping: 0
   subSteps: 5
   viscosityStrength: 0.06
