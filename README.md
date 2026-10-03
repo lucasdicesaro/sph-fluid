@@ -44,6 +44,7 @@ No manual setup needed — the scene file already has all parameters, materials,
 | `targetDensity` | Rest density the fluid tries to reach. For a liquid it must sit near the surface density, which at `smoothingRadius` 0.35 is ~55; a lone particle already reads 6/(π·r²) ≈ 15.6 from itself |
 | `pressureMultiplier` | Stiffness — pressure = multiplier × (density − target), higher = stronger resistance to compression |
 | `damping` | Linear velocity damping per second |
+| `viscosityStrength` | Pulls each particle's velocity toward its neighbours' (damps relative motion only) |
 | `collisionDamping` | Energy retained after a wall bounce (0 = absorb all, 1 = elastic) |
 | `subSteps` | Simulation steps per frame — more = more stable at high speeds |
 | `gravity` | Downward gravity (default 10; set to 0 for top-down view) |

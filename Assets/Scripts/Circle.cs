@@ -21,6 +21,8 @@ public class Circle : MonoBehaviour
     [Range(0f, 1f)] public float collisionDamping = 0.95f;
     public float pressureMultiplier = 500f;
     [Range(0f, 1f)] public float damping = 0.1f;
+    [Tooltip("Pulls each particle's velocity toward its neighbours'. Damps relative motion only, so the fluid flows coherently")]
+    public float viscosityStrength = 0.06f;
     public int subSteps = 5;
 
     [Header("Interaction")]
@@ -59,6 +61,7 @@ public class Circle : MonoBehaviour
     const float PredictionTime = 1f / 120f; // Lague's fixed lookahead, independent of dt
     private Vector2[] _velocities;
     private float[]   _densities;
+    private Vector2[] _accelerations; // pressure + viscosity + interaction, computed in one pass and applied in the next
     private Color[]   _colors;
     private Color[]   _pressureColors;
     private ComputeBuffer _positionBuffer;
@@ -172,6 +175,7 @@ public class Circle : MonoBehaviour
         _predicted      = new Vector4[numParticles];
         _velocities     = new Vector2[numParticles];
         _densities      = new float[numParticles];
+        _accelerations  = new Vector2[numParticles];
         _colors         = new Color[numParticles];
         _pressureColors = new Color[numParticles];
         _cellParticles  = new int[numParticles];
@@ -288,18 +292,20 @@ public class Circle : MonoBehaviour
         // Pass 2: densities from predicted positions
         Parallel.For(0, numParticles, i => _densities[i] = CalculateDensity(_predicted[i]));
 
-        // Pass 3: pressure force (from predicted positions) + apply acceleration + damping
+        // Pass 3: accelerations from predicted positions. Reads velocities (viscosity) so nothing may write them here
         Parallel.For(0, numParticles, i =>
         {
-            Vector2 pressureForce        = CalculatePressureForce(i);
-            _velocities[i]              += pressureForce / _densities[i] * dt;
-            if (_interactionSign != 0f) _velocities[i] += InteractionForce(i) * dt;
-            _velocities[i]              *= Mathf.Pow(1f - damping, dt);
+            Vector2 accel = CalculatePressureForce(i) / _densities[i];
+            if (viscosityStrength != 0f) accel += CalculateViscosityForce(i);
+            if (_interactionSign != 0f)  accel += InteractionForce(i);
+            _accelerations[i] = accel;
         });
 
-        // Pass 4: integrate positions + resolve bounds collisions
+        // Pass 4: apply accelerations + damping, integrate positions, resolve bounds collisions
         Parallel.For(0, numParticles, i =>
         {
+            _velocities[i] += _accelerations[i] * dt;
+            _velocities[i] *= Mathf.Pow(1f - damping, dt);
             _positions[i].x += _velocities[i].x * dt;
             _positions[i].y += _velocities[i].y * dt;
             ResolveCollisions(ref _positions[i], ref _velocities[i]);
@@ -388,6 +394,34 @@ public class Circle : MonoBehaviour
             }
         }
         return force;
+    }
+
+    Vector2 CalculateViscosityForce(int i)
+    {
+        Vector2 force = Vector2.zero;
+        CellCoords(_predicted[i].x, _predicted[i].y, out int cx, out int cy);
+        for (int y = Mathf.Max(cy - 1, 0); y <= Mathf.Min(cy + 1, _gridH - 1); y++)
+        for (int x = Mathf.Max(cx - 1, 0); x <= Mathf.Min(cx + 1, _gridW - 1); x++)
+        {
+            int c = x + y * _gridW;
+            for (int k = _cellStart[c]; k < _cellStart[c + 1]; k++)
+            {
+                int j = _cellParticles[k];
+                if (i == j) continue;
+                float dst = Vector2.Distance(new Vector2(_predicted[i].x, _predicted[i].y),
+                                             new Vector2(_predicted[j].x, _predicted[j].y));
+                force += (_velocities[j] - _velocities[i]) * ViscosityKernel(dst, smoothingRadius);
+            }
+        }
+        return force * viscosityStrength;
+    }
+
+    // Poly6: smooth at dst = 0, so viscosity has no kick between close neighbours
+    float ViscosityKernel(float dst, float radius)
+    {
+        if (dst >= radius) return 0f;
+        float v = radius * radius - dst * dst;
+        return v * v * v / (Mathf.PI * Mathf.Pow(radius, 8) / 4f);
     }
 
     void ResolveCollisions(ref Vector4 position, ref Vector2 velocity)

@@ -526,6 +526,7 @@ MonoBehaviour:
   pressureMultiplier: 500
   damping: 0.1
   subSteps: 5
+  viscosityStrength: 0.06
   interactionRadius: 3
   interactionStrength: 200
   vectorFieldResolution: 20
