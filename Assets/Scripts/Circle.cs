@@ -375,8 +375,9 @@ public class Circle : MonoBehaviour
                 Vector2 rVec = new Vector2(_predicted[i].x - _predicted[j].x,
                                            _predicted[i].y - _predicted[j].y);
                 float dst = rVec.magnitude;
-                if (dst >= smoothingRadius || dst < 0.0001f) continue;
-                Vector2 dir   = rVec / dst;
+                if (dst >= smoothingRadius) continue;
+                // Coincident particles must still repel (Lague uses a random direction); golden-angle spread by index is thread-safe
+                Vector2 dir   = dst > 0.0001f ? rVec / dst : new Vector2(Mathf.Cos(i * 2.39996f), Mathf.Sin(i * 2.39996f));
                 float grad    = SmoothingKernelDerivative(dst, smoothingRadius);
                 float sharedP = (pressureI + PressureFromDensity(_densities[j])) / (_densities[i] + _densities[j]);
                 force        += particleMass * sharedP * grad * dir;
@@ -410,7 +411,7 @@ public class Circle : MonoBehaviour
 
     float SmoothingKernelDerivative(float dst, float radius)
     {
-        if (dst >= radius || dst < 0.0001f) return 0f;
+        if (dst >= radius) return 0f;
         float scale = 12f / (Mathf.PI * Mathf.Pow(radius, 4));
         return (radius - dst) * scale;
     }
