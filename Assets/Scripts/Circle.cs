@@ -20,7 +20,9 @@ public class Circle : MonoBehaviour
     public float gravity = 10f;
     [Range(0f, 1f)] public float collisionDamping = 0.95f;
     public float pressureMultiplier = 500f;
-    [Range(0f, 1f)] public float damping = 0.1f;
+    [Tooltip("Repulsion from a sharper 'near density' with no target: stops particles pairing up or clumping")]
+    public float nearPressureMultiplier = 18f;
+    [Range(0f, 1f)] public float damping = 0f;
     [Tooltip("Pulls each particle's velocity toward its neighbours'. Damps relative motion only, so the fluid flows coherently")]
     public float viscosityStrength = 0.06f;
     public int subSteps = 5;
@@ -61,6 +63,7 @@ public class Circle : MonoBehaviour
     const float PredictionTime = 1f / 120f; // Lague's fixed lookahead, independent of dt
     private Vector2[] _velocities;
     private float[]   _densities;
+    private float[]   _nearDensities;
     private Vector2[] _accelerations; // pressure + viscosity + interaction, computed in one pass and applied in the next
     private Color[]   _colors;
     private Color[]   _pressureColors;
@@ -175,6 +178,7 @@ public class Circle : MonoBehaviour
         _predicted      = new Vector4[numParticles];
         _velocities     = new Vector2[numParticles];
         _densities      = new float[numParticles];
+        _nearDensities  = new float[numParticles];
         _accelerations  = new Vector2[numParticles];
         _colors         = new Color[numParticles];
         _pressureColors = new Color[numParticles];
@@ -290,7 +294,11 @@ public class Circle : MonoBehaviour
         BuildGrid();
 
         // Pass 2: densities from predicted positions
-        Parallel.For(0, numParticles, i => _densities[i] = CalculateDensity(_predicted[i]));
+        Parallel.For(0, numParticles, i =>
+        {
+            _densities[i] = CalculateDensity(_predicted[i]);
+            if (nearPressureMultiplier != 0f) _nearDensities[i] = CalculateNearDensity(_predicted[i]);
+        });
 
         // Pass 3: accelerations from predicted positions. Reads velocities (viscosity) so nothing may write them here
         Parallel.For(0, numParticles, i =>
@@ -364,6 +372,25 @@ public class Circle : MonoBehaviour
         return density;
     }
 
+    float CalculateNearDensity(Vector4 position)
+    {
+        float density = 0f;
+        CellCoords(position.x, position.y, out int cx, out int cy);
+        for (int y = Mathf.Max(cy - 1, 0); y <= Mathf.Min(cy + 1, _gridH - 1); y++)
+        for (int x = Mathf.Max(cx - 1, 0); x <= Mathf.Min(cx + 1, _gridW - 1); x++)
+        {
+            int c = x + y * _gridW;
+            for (int k = _cellStart[c]; k < _cellStart[c + 1]; k++)
+            {
+                int j = _cellParticles[k];
+                float dst = Vector2.Distance(new Vector2(position.x, position.y),
+                                             new Vector2(_predicted[j].x, _predicted[j].y));
+                density += particleMass * NearDensityKernel(dst, smoothingRadius);
+            }
+        }
+        return density;
+    }
+
     float PressureFromDensity(float density)
     {
         return pressureMultiplier * (density - targetDensity);
@@ -391,6 +418,12 @@ public class Circle : MonoBehaviour
                 float grad    = SmoothingKernelDerivative(dst, smoothingRadius);
                 float sharedP = (pressureI + PressureFromDensity(_densities[j])) / (_densities[i] + _densities[j]);
                 force        += particleMass * sharedP * grad * dir;
+                if (nearPressureMultiplier != 0f)
+                {
+                    // Near pressure (Clavet et al. double density relaxation): always repulsive, strongest for close pairs
+                    float sharedNearP = nearPressureMultiplier * (_nearDensities[i] + _nearDensities[j]) / (2f * _nearDensities[j]);
+                    force += particleMass * sharedNearP * NearDensityKernelDerivative(dst, smoothingRadius) * dir;
+                }
             }
         }
         return force;
@@ -414,6 +447,21 @@ public class Circle : MonoBehaviour
             }
         }
         return force * viscosityStrength;
+    }
+
+    // Cubic spike: sharper than the density kernel, so near density mostly counts very close neighbours
+    float NearDensityKernel(float dst, float radius)
+    {
+        if (dst >= radius) return 0f;
+        float v = radius - dst;
+        return v * v * v * 10f / (Mathf.PI * Mathf.Pow(radius, 5));
+    }
+
+    float NearDensityKernelDerivative(float dst, float radius)
+    {
+        if (dst >= radius) return 0f;
+        float v = radius - dst;
+        return v * v * 30f / (Mathf.PI * Mathf.Pow(radius, 5));
     }
 
     // Poly6: smooth at dst = 0, so viscosity has no kick between close neighbours
