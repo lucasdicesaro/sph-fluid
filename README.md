@@ -33,6 +33,10 @@ The scene has two simulation objects. Only one should be enabled at a time; swit
 
 Both share the same controls, mouse interaction and particle shader; each has its own parameter set. `Circle` uses Lague's radius-0.35 scene values for ~4000 particles; `GpuCircle` uses his dense radius-0.2 scene (target density 234, pressure 225, near pressure 18) for ~20000. The fluid's area is roughly particles / (targetDensity − 6/(π·radius²)), so more particles at the same settings overfill the box. The pressure-field background is CPU only.
 
+## 3D scene
+
+`Assets/Scenes/Fluid3D.unity` runs the 3D version from the end of Lague's video: `GpuSphere` + `FluidSim3D.compute`, the GPU pipeline with 3D kernels and a 27-cell spatial hash inside an axis-aligned box, particles drawn as camera-facing billboards shaded as spheres. Particles spawn as a cube at `spawnDensity` per unit volume (default 600 in a 5-unit cube ≈ 74k particles). Defaults are Lague's 3D scene values (smoothing radius 0.2, target density 630, pressure 288, near pressure 2.16). Same keyboard controls; no mouse interaction in 3D. Surface rendering (marching cubes, ray marching) is from his second video and not part of this project.
+
 ## Controls (Play mode)
 
 | Key | Action |
