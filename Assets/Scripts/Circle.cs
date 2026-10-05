@@ -80,7 +80,7 @@ public class Circle : MonoBehaviour
     private Bounds _renderBounds;
     private LineRenderer _boundsLine;
     private LineRenderer _interactionCircle;
-    const int InteractionCircleSegments = 64;
+    internal const int InteractionCircleSegments = 64;
 
     // Spatial grid: dense grid over bounds, cell size = smoothingRadius, counting-sorted each step.
     // Particles in cell c are _cellParticles[_cellStart[c] .. _cellStart[c+1]).
@@ -120,10 +120,12 @@ public class Circle : MonoBehaviour
     void SetupBoundsLine()
     {
         _boundsLine = CreateLine("BoundsLine", Color.green, 5, loop: false);
-        DrawBoundsLine();
+        DrawBoundsLine(_boundsLine, boundsSize);
     }
 
-    LineRenderer CreateLine(string name, Color color, int positionCount, bool loop)
+    // ---- Helpers shared with GpuCircle ----
+
+    internal static LineRenderer CreateLine(string name, Color color, int positionCount, bool loop)
     {
         GameObject obj = GameObject.Find(name);
         if (obj == null) obj = new GameObject(name);
@@ -140,29 +142,56 @@ public class Circle : MonoBehaviour
         return line;
     }
 
-    void DrawInteractionCircle()
+    // Ring around the cursor: green while pulling (sign > 0), red while pushing, hidden when sign == 0
+    internal static void DrawRing(LineRenderer ring, Vector2 centre, float radius, float sign)
     {
-        if (_interactionCircle == null) return;
-        _interactionCircle.enabled = _interactionSign != 0f;
-        if (!_interactionCircle.enabled) return;
+        if (ring == null) return;
+        ring.enabled = sign != 0f;
+        if (!ring.enabled) return;
 
-        Color color = _interactionSign > 0f ? Color.green : Color.red;
-        _interactionCircle.startColor = color;
-        _interactionCircle.endColor   = color;
+        Color color = sign > 0f ? Color.green : Color.red;
+        ring.startColor = color;
+        ring.endColor   = color;
         for (int k = 0; k < InteractionCircleSegments; k++)
         {
             float a = k * 2f * Mathf.PI / InteractionCircleSegments;
-            _interactionCircle.SetPosition(k, new Vector3(_interactionPos.x + Mathf.Cos(a) * interactionRadius,
-                                                          _interactionPos.y + Mathf.Sin(a) * interactionRadius, 0f));
+            ring.SetPosition(k, new Vector3(centre.x + Mathf.Cos(a) * radius, centre.y + Mathf.Sin(a) * radius, 0f));
         }
     }
 
-    void DrawBoundsLine()
+    // Left button = +1 (pull), right button = -1 (push), none = 0; world position of the cursor when pressed
+    internal static float ReadMouse(ref Vector2 worldPos)
     {
-        if (_boundsLine == null) return;
+        Mouse mouse = Mouse.current;
+        if (mouse == null) return 0f;
+        float sign = mouse.leftButton.isPressed ? 1f : mouse.rightButton.isPressed ? -1f : 0f;
+        if (sign != 0f) worldPos = Camera.main.ScreenToWorldPoint(mouse.position.ReadValue());
+        return sign;
+    }
+
+    // Square block of particles centred on screen, spaced one diameter plus spawnGap apart
+    internal static Vector4[] SpawnBlock(int numParticles, float spacing, Vector2 boundsSize)
+    {
+        int cols = Mathf.CeilToInt(Mathf.Sqrt(numParticles));
+        int rows = Mathf.CeilToInt((float)numParticles / cols);
+        if (cols * spacing > boundsSize.x || rows * spacing > boundsSize.y)
+            Debug.LogWarning($"Spawn block {cols}x{rows} ({cols * spacing:F1}x{rows * spacing:F1}) exceeds bounds {boundsSize.x:F1}x{boundsSize.y:F1}; reduce numParticles or spawnGap");
+        Vector2 origin = new Vector2(-(cols - 1) * spacing * 0.5f, -(rows - 1) * spacing * 0.5f);
+        Vector4[] positions = new Vector4[numParticles];
+        for (int i = 0; i < numParticles; i++)
+        {
+            Vector2 pos = origin + new Vector2(i % cols, i / cols) * spacing;
+            positions[i] = new Vector4(pos.x, pos.y, 0f, 0f);
+        }
+        return positions;
+    }
+
+    internal static void DrawBoundsLine(LineRenderer line, Vector2 boundsSize)
+    {
+        if (line == null) return;
         float hx = boundsSize.x * 0.5f;
         float hy = boundsSize.y * 0.5f;
-        _boundsLine.SetPositions(new Vector3[]
+        line.SetPositions(new Vector3[]
         {
             new Vector3(-hx,  hy, 0),
             new Vector3( hx,  hy, 0),
@@ -174,7 +203,6 @@ public class Circle : MonoBehaviour
 
     void InitializeParticles()
     {
-        _positions      = new Vector4[numParticles];
         _predicted      = new Vector4[numParticles];
         _velocities     = new Vector2[numParticles];
         _densities      = new float[numParticles];
@@ -185,17 +213,9 @@ public class Circle : MonoBehaviour
         _cellParticles  = new int[numParticles];
         _cellOf         = new int[numParticles];
 
-        // Square block of particles centred on screen, spaced one diameter plus spawnGap apart
-        float spacing = particleRadius * 2f + spawnGap;
-        int   cols    = Mathf.CeilToInt(Mathf.Sqrt(numParticles));
-        int   rows    = Mathf.CeilToInt((float)numParticles / cols);
-        if (cols * spacing > boundsSize.x || rows * spacing > boundsSize.y)
-            Debug.LogWarning($"Spawn block {cols}x{rows} ({cols * spacing:F1}x{rows * spacing:F1}) exceeds bounds {boundsSize.x:F1}x{boundsSize.y:F1}; reduce numParticles or spawnGap");
-        Vector2 origin = new Vector2(-(cols - 1) * spacing * 0.5f, -(rows - 1) * spacing * 0.5f);
+        _positions = SpawnBlock(numParticles, particleRadius * 2f + spawnGap, boundsSize);
         for (int i = 0; i < numParticles; i++)
         {
-            Vector2 pos = origin + new Vector2(i % cols, i / cols) * spacing;
-            _positions[i]  = new Vector4(pos.x, pos.y, 0f, 0f);
             _predicted[i]  = _positions[i];
             _velocities[i] = Vector2.zero;
         }
@@ -224,8 +244,8 @@ public class Circle : MonoBehaviour
             stepOnce = _paused && kb.rightArrowKey.wasPressedThisFrame;
         }
 
-        ReadMouse();
-        DrawInteractionCircle();
+        _interactionSign = ReadMouse(ref _interactionPos);
+        DrawRing(_interactionCircle, _interactionPos, interactionRadius, _interactionSign);
 
         if (!_paused || stepOnce)
         {
@@ -253,17 +273,6 @@ public class Circle : MonoBehaviour
         instancedMaterial.SetBuffer("_Colors", _colorBuffer);
         instancedMaterial.SetFloat("_ParticleRadius", particleRadius);
         Graphics.DrawMeshInstancedProcedural(_quadMesh, 0, instancedMaterial, _renderBounds, numParticles);
-    }
-
-    void ReadMouse()
-    {
-        Mouse mouse = Mouse.current;
-        _interactionSign = 0f;
-        if (mouse == null) return;
-        if      (mouse.leftButton.isPressed)  _interactionSign =  1f;
-        else if (mouse.rightButton.isPressed) _interactionSign = -1f;
-        if (_interactionSign != 0f)
-            _interactionPos = Camera.main.ScreenToWorldPoint(mouse.position.ReadValue());
     }
 
     // Lague's interaction force: pull toward (or push away from) the cursor, fading to zero at interactionRadius,
@@ -613,7 +622,7 @@ public class Circle : MonoBehaviour
         _dummyBuffer?.Release();
     }
 
-    private Mesh CreateQuadMesh()
+    internal static Mesh CreateQuadMesh()
     {
         Mesh mesh = new Mesh();
         mesh.vertices = new Vector3[]

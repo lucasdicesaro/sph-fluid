@@ -1,0 +1,270 @@
+// GPU version of the Circle.cs simulation, following Sebastian Lague's FluidSim2D compute shader:
+// spatial hash + bitonic merge sort for neighbour search, predicted positions, pressure + near pressure, viscosity.
+#pragma kernel ExternalForces
+#pragma kernel UpdateSpatialHash
+#pragma kernel Sort
+#pragma kernel CalculateOffsets
+#pragma kernel CalculateDensities
+#pragma kernel CalculatePressureForce
+#pragma kernel CalculateViscosity
+#pragma kernel UpdatePositions
+#pragma kernel UpdateColors
+
+static const int NumThreads = 64;
+static const float PI = 3.14159265;
+
+// Buffers
+RWStructuredBuffer<float4> Positions;          // xy used; float4 so Circle.shader reads it directly
+RWStructuredBuffer<float2> PredictedPositions;
+RWStructuredBuffer<float2> Velocities;
+RWStructuredBuffer<float2> Densities;          // x = density, y = near density
+RWStructuredBuffer<uint3>  SpatialIndices;     // (particle index, cell hash, key) sorted by key
+RWStructuredBuffer<uint>   SpatialOffsets;     // first entry in SpatialIndices for each key
+RWStructuredBuffer<float4> Colors;
+StructuredBuffer<float4>   SpeedGradient;      // 64 samples of the speed gradient
+
+// Settings
+uint   numParticles;
+float  deltaTime;
+float  gravity;
+float  collisionDamping;
+float  particleRadius;
+float  smoothingRadius;
+float  targetDensity;
+float  pressureMultiplier;
+float  nearPressureMultiplier;
+float  viscosityStrength;
+float  maxSpeed;
+float2 boundsSize;
+float2 interactionInputPoint;
+float  interactionInputStrength;
+float  interactionInputRadius;
+// Bitonic sort stage parameters
+uint groupWidth;
+uint groupHeight;
+uint stepIndex;
+
+// ---- Spatial hash (Lague) ----
+static const int2 offsets2D[9] =
+{
+    int2(-1, 1), int2(0, 1), int2(1, 1),
+    int2(-1, 0), int2(0, 0), int2(1, 0),
+    int2(-1, -1), int2(0, -1), int2(1, -1),
+};
+static const uint hashK1 = 15823;
+static const uint hashK2 = 9737333;
+
+int2 GetCell2D(float2 position, float radius) { return (int2)floor(position / radius); }
+uint HashCell2D(int2 cell) { uint2 c = (uint2)cell; return c.x * hashK1 + c.y * hashK2; }
+uint KeyFromHash(uint hash, uint tableSize) { return hash % tableSize; }
+
+// ---- Kernels (same as Circle.cs) ----
+float DensityKernel(float dst, float radius)            // (r-d)^2 * 6/(pi r^4)
+{
+    if (dst >= radius) return 0;
+    float v = radius - dst;
+    return v * v * 6 / (PI * pow(radius, 4));
+}
+float DensityDerivative(float dst, float radius)        // (r-d) * 12/(pi r^4)
+{
+    if (dst >= radius) return 0;
+    return (radius - dst) * 12 / (PI * pow(radius, 4));
+}
+float NearDensityKernel(float dst, float radius)        // (r-d)^3 * 10/(pi r^5)
+{
+    if (dst >= radius) return 0;
+    float v = radius - dst;
+    return v * v * v * 10 / (PI * pow(radius, 5));
+}
+float NearDensityDerivative(float dst, float radius)    // (r-d)^2 * 30/(pi r^5)
+{
+    if (dst >= radius) return 0;
+    float v = radius - dst;
+    return v * v * 30 / (PI * pow(radius, 5));
+}
+float ViscosityKernel(float dst, float radius)          // Poly6
+{
+    if (dst >= radius) return 0;
+    float v = radius * radius - dst * dst;
+    return v * v * v * 4 / (PI * pow(radius, 8));
+}
+
+float PressureFromDensity(float density)         { return pressureMultiplier * (density - targetDensity); }
+float NearPressureFromDensity(float nearDensity) { return nearPressureMultiplier * nearDensity; }
+
+// Gravity plus mouse interaction: pull/push toward the cursor fading to zero at the radius, gravity cancelled inside
+// the ring, and a damping term so held water settles (Lague's ExternalForces)
+float2 ExternalForces(float2 pos, float2 velocity)
+{
+    float2 gravityAccel = float2(0, -gravity);
+    if (interactionInputStrength != 0)
+    {
+        float2 offset = interactionInputPoint - pos;
+        float sqrDst = dot(offset, offset);
+        if (sqrDst < interactionInputRadius * interactionInputRadius)
+        {
+            float dst = sqrt(sqrDst);
+            float centreT = 1 - dst / interactionInputRadius;
+            float2 dirToCentre = dst > 0.0001 ? offset / dst : float2(0, 0);
+            float gravityWeight = 1 - centreT * saturate(interactionInputStrength / 10);
+            float2 accel = gravityAccel * gravityWeight + dirToCentre * centreT * interactionInputStrength;
+            accel -= velocity * centreT;
+            return accel;
+        }
+    }
+    return gravityAccel;
+}
+
+[numthreads(NumThreads, 1, 1)]
+void ExternalForces(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= numParticles) return;
+    float2 pos = Positions[id.x].xy;
+    Velocities[id.x] += ExternalForces(pos, Velocities[id.x]) * deltaTime;
+    const float predictionFactor = 1 / 120.0;
+    PredictedPositions[id.x] = pos + Velocities[id.x] * predictionFactor;
+}
+
+[numthreads(NumThreads, 1, 1)]
+void UpdateSpatialHash(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= numParticles) return;
+    SpatialOffsets[id.x] = numParticles; // reset; CalculateOffsets fills the keys that occur
+    int2 cell = GetCell2D(PredictedPositions[id.x], smoothingRadius);
+    uint hash  = HashCell2D(cell);
+    uint key   = KeyFromHash(hash, numParticles);
+    SpatialIndices[id.x] = uint3(id.x, hash, key);
+}
+
+// One compare-and-swap of a bitonic merge sort stage; C# dispatches every (stage, step) pair in order (Lague's GPUSort)
+[numthreads(128, 1, 1)]
+void Sort(uint3 id : SV_DispatchThreadID)
+{
+    uint i = id.x;
+    uint hIndex = i & (groupWidth - 1);
+    uint indexLeft = hIndex + (groupHeight + 1) * (i / groupWidth);
+    uint rightStepSize = stepIndex == 0 ? groupHeight - 2 * hIndex : (groupHeight + 1) / 2;
+    uint indexRight = indexLeft + rightStepSize;
+    if (indexRight >= numParticles) return;
+
+    uint3 left  = SpatialIndices[indexLeft];
+    uint3 right = SpatialIndices[indexRight];
+    if (left.z > right.z)
+    {
+        SpatialIndices[indexLeft]  = right;
+        SpatialIndices[indexRight] = left;
+    }
+}
+
+[numthreads(NumThreads, 1, 1)]
+void CalculateOffsets(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= numParticles) return;
+    uint key     = SpatialIndices[id.x].z;
+    uint keyPrev = id.x == 0 ? numParticles : SpatialIndices[id.x - 1].z;
+    if (key != keyPrev) SpatialOffsets[key] = id.x;
+}
+
+// Visit the 9 cells around pos; the body runs with `neighbourIndex` and `offsetToNeighbour` (neighbour - pos) and `dst`
+#define FOR_EACH_NEIGHBOUR(pos, BODY)                                                         \
+{                                                                                             \
+    int2 originCell = GetCell2D(pos, smoothingRadius);                                        \
+    float sqrRadius = smoothingRadius * smoothingRadius;                                      \
+    for (int c = 0; c < 9; c++)                                                               \
+    {                                                                                         \
+        uint hash = HashCell2D(originCell + offsets2D[c]);                                    \
+        uint key  = KeyFromHash(hash, numParticles);                                          \
+        uint currIndex = SpatialOffsets[key];                                                 \
+        while (currIndex < numParticles)                                                      \
+        {                                                                                     \
+            uint3 indexData = SpatialIndices[currIndex];                                      \
+            currIndex++;                                                                      \
+            if (indexData.z != key) break;      /* left this key's run */                     \
+            if (indexData.y != hash) continue;  /* same key, different cell (hash collision) */\
+            uint neighbourIndex = indexData.x;                                                \
+            float2 offsetToNeighbour = PredictedPositions[neighbourIndex] - pos;              \
+            float sqrDst = dot(offsetToNeighbour, offsetToNeighbour);                         \
+            if (sqrDst > sqrRadius) continue;                                                 \
+            float dst = sqrt(sqrDst);                                                         \
+            BODY                                                                              \
+        }                                                                                     \
+    }                                                                                         \
+}
+
+[numthreads(NumThreads, 1, 1)]
+void CalculateDensities(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= numParticles) return;
+    float2 pos = PredictedPositions[id.x];
+    float density = 0, nearDensity = 0;
+    FOR_EACH_NEIGHBOUR(pos,
+        density     += DensityKernel(dst, smoothingRadius);
+        nearDensity += NearDensityKernel(dst, smoothingRadius);
+    )
+    Densities[id.x] = float2(density, nearDensity);
+}
+
+[numthreads(NumThreads, 1, 1)]
+void CalculatePressureForce(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= numParticles) return;
+    float2 pos = PredictedPositions[id.x];
+    float density      = Densities[id.x].x;
+    float nearDensity  = Densities[id.x].y;
+    float pressure     = PressureFromDensity(density);
+    float nearPressure = NearPressureFromDensity(nearDensity);
+    float2 pressureForce = 0;
+
+    FOR_EACH_NEIGHBOUR(pos,
+        if (neighbourIndex == id.x) continue;
+        float2 dirToNeighbour = dst > 0 ? offsetToNeighbour / dst : float2(0, 1);
+        float neighbourDensity      = Densities[neighbourIndex].x;
+        float neighbourNearDensity  = Densities[neighbourIndex].y;
+        float sharedPressure     = (pressure + PressureFromDensity(neighbourDensity)) * 0.5;
+        float sharedNearPressure = (nearPressure + NearPressureFromDensity(neighbourNearDensity)) * 0.5;
+        // derivative kernels here are positive magnitudes, so the force points away from the neighbour
+        pressureForce -= dirToNeighbour * DensityDerivative(dst, smoothingRadius) * sharedPressure / neighbourDensity;
+        pressureForce -= dirToNeighbour * NearDensityDerivative(dst, smoothingRadius) * sharedNearPressure / neighbourNearDensity;
+    )
+
+    Velocities[id.x] += pressureForce / density * deltaTime;
+}
+
+[numthreads(NumThreads, 1, 1)]
+void CalculateViscosity(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= numParticles) return;
+    float2 pos = PredictedPositions[id.x];
+    float2 velocity = Velocities[id.x];
+    float2 viscosityForce = 0;
+
+    FOR_EACH_NEIGHBOUR(pos,
+        if (neighbourIndex == id.x) continue;
+        viscosityForce += (Velocities[neighbourIndex] - velocity) * ViscosityKernel(dst, smoothingRadius);
+    )
+
+    Velocities[id.x] += viscosityForce * viscosityStrength * deltaTime;
+}
+
+[numthreads(NumThreads, 1, 1)]
+void UpdatePositions(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= numParticles) return;
+    float2 pos = Positions[id.x].xy + Velocities[id.x] * deltaTime;
+    float2 vel = Velocities[id.x];
+
+    float2 halfBounds = boundsSize * 0.5 - particleRadius;
+    if (abs(pos.x) > halfBounds.x) { pos.x = halfBounds.x * sign(pos.x); vel.x *= -collisionDamping; }
+    if (abs(pos.y) > halfBounds.y) { pos.y = halfBounds.y * sign(pos.y); vel.y *= -collisionDamping; }
+
+    Positions[id.x]  = float4(pos, 0, 0);
+    Velocities[id.x] = vel;
+}
+
+[numthreads(NumThreads, 1, 1)]
+void UpdateColors(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= numParticles) return;
+    float t = saturate(length(Velocities[id.x]) / maxSpeed);
+    Colors[id.x] = SpeedGradient[(uint)(t * 63)];
+}
