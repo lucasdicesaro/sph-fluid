@@ -24,12 +24,12 @@ No manual setup needed — the scene file already has all parameters, materials,
 
 ## CPU and GPU simulations
 
-The scene has two simulation objects. Enable one and disable the other in the Hierarchy:
+The scene has two simulation objects. Only one should be enabled at a time; switch in the Hierarchy:
 
 | GameObject | Component | Runs on | Notes |
 |---|---|---|---|
-| `GameObject` | `Circle` | CPU (`Parallel.For`, dense grid) | Reference version. Has the debug readouts: density at cursor, vector field, grid validation |
-| `GpuCircle` | `GpuCircle` | GPU (`FluidSim2D.compute`) | Same physics as compute shader kernels; neighbour search via spatial hash + bitonic merge sort, as in Lague's video. Scales to tens of thousands of particles |
+| `GpuCircle` (enabled by default) | `GpuCircle` | GPU (`FluidSim2D.compute`) | Same physics as compute shader kernels; neighbour search via spatial hash + bitonic merge sort, as in Lague's video. Scales to tens of thousands of particles |
+| `CpuCircle` (disabled by default) | `Circle` | CPU (`Parallel.For`, dense grid) | Reference version. Has the debug readouts: density at cursor, vector field, grid validation |
 
 Both share the same controls, mouse interaction and particle shader; each has its own parameter set. `Circle` uses Lague's radius-0.35 scene values for ~4000 particles; `GpuCircle` uses his dense radius-0.2 scene (target density 234, pressure 225, near pressure 18) for ~20000. The fluid's area is roughly particles / (targetDensity − 6/(π·radius²)), so more particles at the same settings overfill the box. The pressure-field background is CPU only.
 
