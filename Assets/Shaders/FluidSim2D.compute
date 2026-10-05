@@ -2,8 +2,9 @@
 // spatial hash + bitonic merge sort for neighbour search, predicted positions, pressure + near pressure, viscosity.
 #pragma kernel ExternalForces
 #pragma kernel UpdateSpatialHash
-#pragma kernel Sort
-#pragma kernel CalculateOffsets
+#pragma kernel CountKeys
+#pragma kernel ScanOffsets
+#pragma kernel ScatterEntries
 #pragma kernel CalculateDensities
 #pragma kernel CalculatePressureForce
 #pragma kernel CalculateViscosity
@@ -19,6 +20,7 @@ RWStructuredBuffer<float2> PredictedPositions;
 RWStructuredBuffer<float2> Velocities;
 RWStructuredBuffer<float2> Densities;          // x = density, y = near density
 RWStructuredBuffer<uint3>  SpatialIndices;     // (particle index, cell hash, key) sorted by key
+RWStructuredBuffer<uint3>  UnsortedEntries;    // same, in particle order, before the count sort
 RWStructuredBuffer<uint>   SpatialOffsets;     // first entry in SpatialIndices for each key
 RWStructuredBuffer<float4> Colors;
 StructuredBuffer<float4>   SpeedGradient;      // 64 samples of the speed gradient
@@ -39,10 +41,6 @@ float2 boundsSize;
 float2 interactionInputPoint;
 float  interactionInputStrength;
 float  interactionInputRadius;
-// Bitonic sort stage parameters
-uint groupWidth;
-uint groupHeight;
-uint stepIndex;
 
 // ---- Spatial hash (Lague) ----
 static const int2 offsets2D[9] =
@@ -129,43 +127,62 @@ void ExternalForces(uint3 id : SV_DispatchThreadID)
 void UpdateSpatialHash(uint3 id : SV_DispatchThreadID)
 {
     if (id.x >= numParticles) return;
-    SpatialOffsets[id.x] = numParticles; // reset; CalculateOffsets fills the keys that occur
+    SpatialOffsets[id.x] = 0; // key counts, filled by CountKeys
     int2 cell = GetCell2D(PredictedPositions[id.x], smoothingRadius);
     uint hash  = HashCell2D(cell);
     uint key   = KeyFromHash(hash, numParticles);
-    SpatialIndices[id.x] = uint3(id.x, hash, key);
+    UnsortedEntries[id.x] = uint3(id.x, hash, key);
 }
 
-// One compare-and-swap of a bitonic merge sort stage; C# dispatches every (stage, step) pair in order (Lague's GPUSort)
-[numthreads(128, 1, 1)]
-void Sort(uint3 id : SV_DispatchThreadID)
+// ---- Count sort by key (Lague's GPUCountSort): count -> inclusive scan -> scatter with atomic decrement.
+// After ScatterEntries, SpatialOffsets[key] holds the first index of that key's run in SpatialIndices.
+[numthreads(NumThreads, 1, 1)]
+void CountKeys(uint3 id : SV_DispatchThreadID)
 {
-    uint i = id.x;
-    uint hIndex = i & (groupWidth - 1);
-    uint indexLeft = hIndex + (groupHeight + 1) * (i / groupWidth);
-    uint rightStepSize = stepIndex == 0 ? groupHeight - 2 * hIndex : (groupHeight + 1) / 2;
-    uint indexRight = indexLeft + rightStepSize;
-    if (indexRight >= numParticles) return;
+    if (id.x >= numParticles) return;
+    InterlockedAdd(SpatialOffsets[UnsortedEntries[id.x].z], 1);
+}
 
-    uint3 left  = SpatialIndices[indexLeft];
-    uint3 right = SpatialIndices[indexRight];
-    if (left.z > right.z)
+// Inclusive prefix sum over all numParticles counts in a single thread group: each thread scans a contiguous chunk,
+// the chunk totals are scanned in shared memory, then each chunk is offset. Two passes over memory, no recursion.
+static const uint ScanThreads = 1024;
+groupshared uint chunkSums[ScanThreads];
+
+[numthreads(1024, 1, 1)]
+void ScanOffsets(uint3 gid : SV_GroupThreadID)
+{
+    uint t = gid.x;
+    uint chunk = (numParticles + ScanThreads - 1) / ScanThreads;
+    uint first = t * chunk;
+    uint last  = min(first + chunk, numParticles);
+
+    uint sum = 0;
+    for (uint i = first; i < last; i++) { sum += SpatialOffsets[i]; SpatialOffsets[i] = sum; }
+    chunkSums[t] = sum;
+    GroupMemoryBarrierWithGroupSync();
+
+    for (uint offset = 1; offset < ScanThreads; offset <<= 1)
     {
-        SpatialIndices[indexLeft]  = right;
-        SpatialIndices[indexRight] = left;
+        uint v = t >= offset ? chunkSums[t - offset] : 0;
+        GroupMemoryBarrierWithGroupSync();
+        chunkSums[t] += v;
+        GroupMemoryBarrierWithGroupSync();
     }
+
+    uint add = chunkSums[t] - sum; // exclusive prefix of this chunk
+    for (uint j = first; j < last; j++) SpatialOffsets[j] += add;
 }
 
 [numthreads(NumThreads, 1, 1)]
-void CalculateOffsets(uint3 id : SV_DispatchThreadID)
+void ScatterEntries(uint3 id : SV_DispatchThreadID)
 {
     if (id.x >= numParticles) return;
-    uint key     = SpatialIndices[id.x].z;
-    uint keyPrev = id.x == 0 ? numParticles : SpatialIndices[id.x - 1].z;
-    if (key != keyPrev) SpatialOffsets[key] = id.x;
+    uint3 entry = UnsortedEntries[id.x];
+    uint end;
+    InterlockedAdd(SpatialOffsets[entry.z], 0xFFFFFFFFu, end); // decrement; returns the value before
+    SpatialIndices[end - 1] = entry;
 }
 
-// Visit the 9 cells around pos; the body runs with `neighbourIndex` and `offsetToNeighbour` (neighbour - pos) and `dst`
 #define FOR_EACH_NEIGHBOUR(pos, BODY)                                                         \
 {                                                                                             \
     int2 originCell = GetCell2D(pos, smoothingRadius);                                        \

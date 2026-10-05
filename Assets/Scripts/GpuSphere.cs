@@ -11,7 +11,7 @@ public class GpuSphere : MonoBehaviour
 
     [Header("Spawn (cube)")]
     [Tooltip("Particles per unit volume; particles per axis = round(size * cbrt(density))")]
-    public float spawnDensity = 193f;
+    public float spawnDensity = 286f;
     public Vector3 spawnSize = new Vector3(7f, 7f, 14f);   // Lague's two 7-unit cubes side by side
     public Vector3 spawnCentre = new Vector3(-8.3f, -1.3f, 0f);
     public float jitterStrength = 0.035f;
@@ -43,15 +43,14 @@ public class GpuSphere : MonoBehaviour
     public float maxSpeed = 8f;
     public bool showInfo = true;
 
-    const int ExternalForcesKernel = 0, SpatialHashKernel = 1, SortKernel = 2, OffsetsKernel = 3,
-              DensityKernel = 4, PressureKernel = 5, ViscosityKernel = 6, UpdatePositionsKernel = 7, ColorsKernel = 8;
-    const int KernelCount = 9;
+    const int ExternalForcesKernel = 0, SpatialHashKernel = 1, CountKernel = 2, ScanKernel = 3, ScatterKernel = 4,
+              DensityKernel = 5, PressureKernel = 6, ViscosityKernel = 7, UpdatePositionsKernel = 8, ColorsKernel = 9;
+    const int KernelCount = 10;
     const int ThreadGroupSize = 64;
-    const int SortThreadGroupSize = 128;
     const int GradientSamples = 64;
 
     private int _numParticles;
-    private ComputeBuffer _positions, _predicted, _velocities, _densities, _spatialIndices, _spatialOffsets, _colors, _gradient;
+    private ComputeBuffer _positions, _predicted, _velocities, _densities, _spatialIndices, _unsortedEntries, _spatialOffsets, _colors, _gradient;
     private Vector4[] _spawnPositions;
     private Vector3[] _spawnPositions3;
     private Vector3[] _zeroVelocities;
@@ -111,6 +110,7 @@ public class GpuSphere : MonoBehaviour
         _velocities     = new ComputeBuffer(_numParticles, sizeof(float) * 3);
         _densities      = new ComputeBuffer(_numParticles, sizeof(float) * 2);
         _spatialIndices = new ComputeBuffer(_numParticles, sizeof(uint) * 3);
+        _unsortedEntries = new ComputeBuffer(_numParticles, sizeof(uint) * 3);
         _spatialOffsets = new ComputeBuffer(_numParticles, sizeof(uint));
         _colors         = new ComputeBuffer(_numParticles, sizeof(float) * 4);
         _gradient       = new ComputeBuffer(GradientSamples, sizeof(float) * 4);
@@ -123,6 +123,7 @@ public class GpuSphere : MonoBehaviour
             compute.SetBuffer(k, "Velocities",         _velocities);
             compute.SetBuffer(k, "Densities",          _densities);
             compute.SetBuffer(k, "SpatialIndices",     _spatialIndices);
+            compute.SetBuffer(k, "UnsortedEntries",    _unsortedEntries);
             compute.SetBuffer(k, "SpatialOffsets",     _spatialOffsets);
             compute.SetBuffer(k, "Colors",             _colors);
             compute.SetBuffer(k, "SpeedGradient",      _gradient);
@@ -148,7 +149,7 @@ public class GpuSphere : MonoBehaviour
         bool stepOnce = false;
         if (kb != null)
         {
-            if (kb.rKey.wasPressedThisFrame) { ResetParticles(); _paused = true; }
+            if (kb.rKey.wasPressedThisFrame) { CreateBuffers(); _paused = true; } // rebuild so inspector changes (count, spawn) apply
             if (kb.spaceKey.wasPressedThisFrame) _paused = !_paused;
             stepOnce = _paused && kb.rightArrowKey.wasPressedThisFrame;
         }
@@ -183,8 +184,9 @@ public class GpuSphere : MonoBehaviour
     {
         Dispatch(ExternalForcesKernel);
         Dispatch(SpatialHashKernel);
-        RunSort();
-        Dispatch(OffsetsKernel);
+        Dispatch(CountKernel);
+        compute.Dispatch(ScanKernel, 1, 1, 1); // single thread group scans all counts
+        Dispatch(ScatterKernel);
         Dispatch(DensityKernel);
         Dispatch(PressureKernel);
         if (viscosityStrength != 0f) Dispatch(ViscosityKernel);
@@ -192,22 +194,6 @@ public class GpuSphere : MonoBehaviour
     }
 
     void Dispatch(int kernel) => compute.Dispatch(kernel, Mathf.CeilToInt(_numParticles / (float)ThreadGroupSize), 1, 1);
-
-    void RunSort()
-    {
-        int numPairs  = Mathf.NextPowerOfTwo(_numParticles) / 2;
-        int numStages = (int)Mathf.Log(numPairs * 2, 2);
-        int groups    = Mathf.CeilToInt(numPairs / (float)SortThreadGroupSize);
-        for (int stage = 0; stage < numStages; stage++)
-        for (int step = 0; step < stage + 1; step++)
-        {
-            int groupWidth = 1 << (stage - step);
-            compute.SetInt("groupWidth",  groupWidth);
-            compute.SetInt("groupHeight", 2 * groupWidth - 1);
-            compute.SetInt("stepIndex",   step);
-            compute.Dispatch(SortKernel, groups, 1, 1);
-        }
-    }
 
     void UpdateColors()
     {
@@ -227,7 +213,7 @@ public class GpuSphere : MonoBehaviour
     void ReleaseBuffers()
     {
         _positions?.Release(); _predicted?.Release(); _velocities?.Release(); _densities?.Release();
-        _spatialIndices?.Release(); _spatialOffsets?.Release(); _colors?.Release(); _gradient?.Release();
+        _spatialIndices?.Release(); _unsortedEntries?.Release(); _spatialOffsets?.Release(); _colors?.Release(); _gradient?.Release();
         _positions = null;
     }
 

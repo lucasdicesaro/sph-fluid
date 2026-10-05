@@ -43,14 +43,13 @@ public class GpuCircle : MonoBehaviour
     public bool showInfo = false;
 
     // Kernel indices follow the #pragma kernel order in FluidSim2D.compute
-    const int ExternalForcesKernel = 0, SpatialHashKernel = 1, SortKernel = 2, OffsetsKernel = 3,
-              DensityKernel = 4, PressureKernel = 5, ViscosityKernel = 6, UpdatePositionsKernel = 7, ColorsKernel = 8;
-    const int KernelCount = 9;
+    const int ExternalForcesKernel = 0, SpatialHashKernel = 1, CountKernel = 2, ScanKernel = 3, ScatterKernel = 4,
+              DensityKernel = 5, PressureKernel = 6, ViscosityKernel = 7, UpdatePositionsKernel = 8, ColorsKernel = 9;
+    const int KernelCount = 10;
     const int ThreadGroupSize = 64;
-    const int SortThreadGroupSize = 128;
     const int GradientSamples = 64;
 
-    private ComputeBuffer _positions, _predicted, _velocities, _densities, _spatialIndices, _spatialOffsets, _colors, _gradient;
+    private ComputeBuffer _positions, _predicted, _velocities, _densities, _spatialIndices, _unsortedEntries, _spatialOffsets, _colors, _gradient;
     private Vector4[] _spawnPositions;
     private Vector2[] _spawnPositions2;
     private Vector2[] _zeroVelocities;
@@ -91,6 +90,7 @@ public class GpuCircle : MonoBehaviour
         _velocities     = new ComputeBuffer(numParticles, sizeof(float) * 2);
         _densities      = new ComputeBuffer(numParticles, sizeof(float) * 2);
         _spatialIndices = new ComputeBuffer(numParticles, sizeof(uint) * 3);
+        _unsortedEntries = new ComputeBuffer(numParticles, sizeof(uint) * 3);
         _spatialOffsets = new ComputeBuffer(numParticles, sizeof(uint));
         _colors         = new ComputeBuffer(numParticles, sizeof(float) * 4);
         _gradient       = new ComputeBuffer(GradientSamples, sizeof(float) * 4);
@@ -104,6 +104,7 @@ public class GpuCircle : MonoBehaviour
             compute.SetBuffer(k, "Velocities",         _velocities);
             compute.SetBuffer(k, "Densities",          _densities);
             compute.SetBuffer(k, "SpatialIndices",     _spatialIndices);
+            compute.SetBuffer(k, "UnsortedEntries",    _unsortedEntries);
             compute.SetBuffer(k, "SpatialOffsets",     _spatialOffsets);
             compute.SetBuffer(k, "Colors",             _colors);
             compute.SetBuffer(k, "SpeedGradient",      _gradient);
@@ -130,7 +131,7 @@ public class GpuCircle : MonoBehaviour
         bool stepOnce = false;
         if (kb != null)
         {
-            if (kb.rKey.wasPressedThisFrame) { ResetParticles(); _paused = true; }
+            if (kb.rKey.wasPressedThisFrame) { CreateBuffers(); _paused = true; } // rebuild so inspector changes (count, spawn) apply
             if (kb.spaceKey.wasPressedThisFrame) _paused = !_paused;
             stepOnce = _paused && kb.rightArrowKey.wasPressedThisFrame;
         }
@@ -173,8 +174,9 @@ public class GpuCircle : MonoBehaviour
     {
         Dispatch(ExternalForcesKernel);
         Dispatch(SpatialHashKernel);
-        RunSort();
-        Dispatch(OffsetsKernel);
+        Dispatch(CountKernel);
+        compute.Dispatch(ScanKernel, 1, 1, 1); // single thread group scans all counts
+        Dispatch(ScatterKernel);
         Dispatch(DensityKernel);
         Dispatch(PressureKernel);
         Dispatch(ViscosityKernel);
@@ -184,26 +186,6 @@ public class GpuCircle : MonoBehaviour
     void Dispatch(int kernel)
     {
         compute.Dispatch(kernel, Mathf.CeilToInt(numParticles / (float)ThreadGroupSize), 1, 1);
-    }
-
-    // Bitonic merge sort of SpatialIndices by key (Lague's GPUSort): every (stage, step) pair is one dispatch
-    void RunSort()
-    {
-        int numPairs  = Mathf.NextPowerOfTwo(numParticles) / 2;
-        int numStages = (int)Mathf.Log(numPairs * 2, 2);
-        int groups    = Mathf.CeilToInt(numPairs / (float)SortThreadGroupSize);
-        for (int stage = 0; stage < numStages; stage++)
-        {
-            for (int step = 0; step < stage + 1; step++)
-            {
-                int groupWidth  = 1 << (stage - step);
-                int groupHeight = 2 * groupWidth - 1;
-                compute.SetInt("groupWidth",  groupWidth);
-                compute.SetInt("groupHeight", groupHeight);
-                compute.SetInt("stepIndex",   step);
-                compute.Dispatch(SortKernel, groups, 1, 1);
-            }
-        }
     }
 
     void UpdateColors()
@@ -224,7 +206,7 @@ public class GpuCircle : MonoBehaviour
     void ReleaseBuffers()
     {
         _positions?.Release(); _predicted?.Release(); _velocities?.Release(); _densities?.Release();
-        _spatialIndices?.Release(); _spatialOffsets?.Release(); _colors?.Release(); _gradient?.Release();
+        _spatialIndices?.Release(); _unsortedEntries?.Release(); _spatialOffsets?.Release(); _colors?.Release(); _gradient?.Release();
         _positions = null;
     }
 
