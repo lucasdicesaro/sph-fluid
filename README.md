@@ -17,7 +17,7 @@ A 2D SPH (Smoothed Particle Hydrodynamics) fluid simulation built in Unity, base
 
 1. Clone the repo
 2. Open **Unity Hub** → **Add project from disk** → select the repo root folder
-3. In the Project panel, double-click `Assets/Scenes/SampleScene.unity` ← required on first open; Unity remembers it after that
+3. In the Project panel, double-click `Assets/Scenes/Fluid2D.unity` ← required on first open; Unity remembers it after that
 4. Press Play
 
 No manual setup needed — the scene file already has all parameters, materials, and shader assignments saved.
