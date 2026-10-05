@@ -34,6 +34,8 @@ float  nearPressureMultiplier;
 float  viscosityStrength;
 float  maxSpeed;
 float3 boundsSize;
+float4x4 localToWorld;   // the GpuSphere transform: move/rotate it in the Scene view to tilt the box
+float4x4 worldToLocal;
 
 // ---- Spatial hash 3D (Lague) ----
 static const int3 offsets3D[27] =
@@ -217,10 +219,17 @@ void UpdatePositions(uint3 id : SV_DispatchThreadID)
     if (id.x >= numParticles) return;
     float3 vel = Velocities[id.x];
     float3 pos = Positions[id.x].xyz + vel * deltaTime;
+
+    // Collide in the box's local space so the box can be moved and rotated (Lague's ResolveCollisions)
+    float3 posLocal = mul(worldToLocal, float4(pos, 1)).xyz;
+    float3 velLocal = mul(worldToLocal, float4(vel, 0)).xyz;
     float3 halfSize = boundsSize * 0.5;
-    if (abs(pos.x) > halfSize.x) { pos.x = halfSize.x * sign(pos.x); vel.x *= -collisionDamping; }
-    if (abs(pos.y) > halfSize.y) { pos.y = halfSize.y * sign(pos.y); vel.y *= -collisionDamping; }
-    if (abs(pos.z) > halfSize.z) { pos.z = halfSize.z * sign(pos.z); vel.z *= -collisionDamping; }
+    if (abs(posLocal.x) > halfSize.x) { posLocal.x = halfSize.x * sign(posLocal.x); velLocal.x *= -collisionDamping; }
+    if (abs(posLocal.y) > halfSize.y) { posLocal.y = halfSize.y * sign(posLocal.y); velLocal.y *= -collisionDamping; }
+    if (abs(posLocal.z) > halfSize.z) { posLocal.z = halfSize.z * sign(posLocal.z); velLocal.z *= -collisionDamping; }
+    pos = mul(localToWorld, float4(posLocal, 1)).xyz;
+    vel = mul(localToWorld, float4(velLocal, 0)).xyz;
+
     Positions[id.x]  = float4(pos, 0);
     Velocities[id.x] = vel;
 }

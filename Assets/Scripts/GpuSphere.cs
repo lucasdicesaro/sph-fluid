@@ -4,6 +4,7 @@ using UnityEngine.InputSystem;
 // 3D fluid on the GPU (FluidSim3D.compute): the GpuCircle pipeline with 3D kernels, a 27-cell spatial hash and an
 // axis-aligned box, following the 3D part of Sebastian Lague's video. Particles are drawn as camera-facing billboards
 // shaded as spheres. Defaults are Lague's 3D scene values (radius 0.2, target 630, pressure 288, near 2.16).
+// This object's transform is the box: move or rotate it in the Scene view during Play to tilt the fluid.
 public class GpuSphere : MonoBehaviour
 {
     public ComputeShader compute;
@@ -61,9 +62,12 @@ public class GpuSphere : MonoBehaviour
 
     void Start()
     {
-        _quadMesh     = Circle.CreateQuadMesh();
-        _renderBounds = new Bounds(Vector3.zero, boundsSize + Vector3.one * smoothingRadius * 2f);
-        DrawBoundsBox(Circle.CreateLine("BoundsBox", Color.green, 16, loop: false), boundsSize);
+        _quadMesh = Circle.CreateQuadMesh();
+        // The wireframe is a child of this transform in local space, so moving/rotating the GpuSphere object moves the box
+        LineRenderer box = Circle.CreateLine("BoundsBox", Color.green, 16, loop: false);
+        box.transform.SetParent(transform, false);
+        box.useWorldSpace = false;
+        DrawBoundsBox(box, boundsSize);
         CreateBuffers();
     }
 
@@ -164,6 +168,7 @@ public class GpuSphere : MonoBehaviour
 
         UpdateColors();
         instancedMaterial.SetFloat("_ParticleRadius", particleRadius);
+        _renderBounds = new Bounds(transform.position, Vector3.one * (boundsSize.magnitude + smoothingRadius * 2f)); // covers any rotation
         Graphics.DrawMeshInstancedProcedural(_quadMesh, 0, instancedMaterial, _renderBounds, _numParticles);
     }
 
@@ -178,6 +183,8 @@ public class GpuSphere : MonoBehaviour
         compute.SetFloat("nearPressureMultiplier", nearPressureMultiplier);
         compute.SetFloat("viscosityStrength",      viscosityStrength);
         compute.SetVector("boundsSize",            boundsSize);
+        compute.SetMatrix("localToWorld",          transform.localToWorldMatrix);
+        compute.SetMatrix("worldToLocal",          transform.worldToLocalMatrix);
     }
 
     void RunSimulationStep()
