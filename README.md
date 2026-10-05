@@ -35,7 +35,7 @@ Both share the same controls, mouse interaction and particle shader; each has it
 
 ## 3D scene
 
-`Assets/Scenes/Fluid3D.unity` runs the 3D version from the end of Lague's video: `GpuSphere` + `FluidSim3D.compute`, the GPU pipeline with 3D kernels and a 27-cell spatial hash inside an axis-aligned box, particles drawn as camera-facing billboards shaded as spheres. Particles spawn as a cube at `spawnDensity` per unit volume (default 600 in a 5-unit cube ≈ 74k particles). Defaults are Lague's 3D scene values (smoothing radius 0.2, target density 630, pressure 288, near pressure 2.16). Same keyboard controls; no mouse interaction in 3D. Surface rendering (marching cubes, ray marching) is from his second video and not part of this project.
+`Assets/Scenes/Fluid3D.unity` runs the 3D version from the end of Lague's video: `GpuSphere` + `FluidSim3D.compute`, the GPU pipeline with 3D kernels and a 27-cell spatial hash inside an axis-aligned box, particles drawn as camera-facing billboards shaded as spheres. Particles spawn as a block at `spawnDensity` per unit volume (default 193 in a 7×7×14 block ≈ 130k particles in a 24×10×15 box; Lague's scene uses 600 ≈ 410k, raise `spawnDensity` if your GPU keeps up). Defaults are Lague's 3D scene values (smoothing radius 0.2, target density 630, pressure 288, near pressure 2.16). Same keyboard controls; no mouse interaction in 3D. Surface rendering (marching cubes, ray marching) is from his second video and not part of this project.
 
 ## Controls (Play mode)
 

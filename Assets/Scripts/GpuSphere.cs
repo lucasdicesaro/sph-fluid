@@ -10,14 +10,14 @@ public class GpuSphere : MonoBehaviour
     public Material instancedMaterial;
 
     [Header("Spawn (cube)")]
-    [Tooltip("Particles per unit volume; particle count = round(cbrt(density * size^3))^3")]
-    public float spawnDensity = 600f;
-    public float spawnSize = 5f;
-    public Vector3 spawnCentre = new Vector3(0f, 1f, 0f);
+    [Tooltip("Particles per unit volume; particles per axis = round(size * cbrt(density))")]
+    public float spawnDensity = 193f;
+    public Vector3 spawnSize = new Vector3(7f, 7f, 14f);   // Lague's two 7-unit cubes side by side
+    public Vector3 spawnCentre = new Vector3(-8.3f, -1.3f, 0f);
     public float jitterStrength = 0.035f;
 
     [Header("Simulation")]
-    public Vector3 boundsSize = new Vector3(12f, 8f, 8f);
+    public Vector3 boundsSize = new Vector3(24f, 10f, 15f);
     public float particleRadius = 0.04f;
     public float smoothingRadius = 0.2f;
     public float targetDensity = 630f;
@@ -85,19 +85,22 @@ public class GpuSphere : MonoBehaviour
     {
         ReleaseBuffers();
 
-        // Lague's Spawner3D: a cube of particles at spawnDensity per unit volume, with jitter
-        int perAxis   = Mathf.Max(1, Mathf.RoundToInt(Mathf.Pow(spawnDensity * spawnSize * spawnSize * spawnSize, 1f / 3f)));
-        _numParticles = perAxis * perAxis * perAxis;
+        // Lague's Spawner3D: a block of particles at spawnDensity per unit volume, with jitter
+        float perUnit = Mathf.Pow(spawnDensity, 1f / 3f);
+        int nx = Mathf.Max(1, Mathf.RoundToInt(spawnSize.x * perUnit));
+        int ny = Mathf.Max(1, Mathf.RoundToInt(spawnSize.y * perUnit));
+        int nz = Mathf.Max(1, Mathf.RoundToInt(spawnSize.z * perUnit));
+        _numParticles = nx * ny * nz;
         _spawnPositions  = new Vector4[_numParticles];
         _spawnPositions3 = new Vector3[_numParticles];
         _zeroVelocities  = new Vector3[_numParticles];
         int i = 0;
-        for (int x = 0; x < perAxis; x++)
-        for (int y = 0; y < perAxis; y++)
-        for (int z = 0; z < perAxis; z++)
+        for (int x = 0; x < nx; x++)
+        for (int y = 0; y < ny; y++)
+        for (int z = 0; z < nz; z++)
         {
-            Vector3 t = perAxis > 1 ? new Vector3(x, y, z) / (perAxis - 1f) : Vector3.one * 0.5f;
-            Vector3 p = spawnCentre + (t - Vector3.one * 0.5f) * spawnSize + Random.insideUnitSphere * jitterStrength;
+            Vector3 t = new Vector3(nx > 1 ? x / (nx - 1f) : 0.5f, ny > 1 ? y / (ny - 1f) : 0.5f, nz > 1 ? z / (nz - 1f) : 0.5f);
+            Vector3 p = spawnCentre + Vector3.Scale(t - Vector3.one * 0.5f, spawnSize) + Random.insideUnitSphere * jitterStrength;
             _spawnPositions3[i] = p;
             _spawnPositions[i]  = new Vector4(p.x, p.y, p.z, 0f);
             i++;
