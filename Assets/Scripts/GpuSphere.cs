@@ -12,7 +12,7 @@ public class GpuSphere : MonoBehaviour
 
     [Header("Spawn (cube)")]
     [Tooltip("Particles per unit volume; particles per axis = round(size * cbrt(density))")]
-    public float spawnDensity = 286f;
+    public float spawnDensity = 600f;
     public Vector3 spawnSize = new Vector3(7f, 7f, 14f);   // Lague's two 7-unit cubes side by side
     public Vector3 spawnCentre = new Vector3(-8.3f, -1.3f, 0f);
     public float jitterStrength = 0.035f;
@@ -45,19 +45,22 @@ public class GpuSphere : MonoBehaviour
     public bool showInfo = true;
 
     const int ExternalForcesKernel = 0, SpatialHashKernel = 1, CountKernel = 2, ScanKernel = 3, ScatterKernel = 4,
-              DensityKernel = 5, PressureKernel = 6, ViscosityKernel = 7, UpdatePositionsKernel = 8, ColorsKernel = 9;
-    const int KernelCount = 10;
+              ReorderKernel = 5, CopyBackKernel = 6, DensityKernel = 7, PressureKernel = 8, ViscosityKernel = 9,
+              UpdatePositionsKernel = 10, ColorsKernel = 11;
+    const int KernelCount = 12;
     const int ThreadGroupSize = 64;
     const int GradientSamples = 64;
 
     private int _numParticles;
-    private ComputeBuffer _positions, _predicted, _velocities, _densities, _spatialIndices, _unsortedEntries, _spatialOffsets, _colors, _gradient;
+    private ComputeBuffer _positions, _predicted, _velocities, _densities, _spatialIndices, _unsortedEntries, _spatialOffsets, _colors, _gradient,
+                          _sortPositions, _sortPredicted, _sortVelocities;
     private Vector4[] _spawnPositions;
     private Vector3[] _spawnPositions3;
     private Vector3[] _zeroVelocities;
     private Vector4[] _gradientSamples = new Vector4[GradientSamples];
     private Mesh _quadMesh;
     private Bounds _renderBounds;
+    private float _fps;
     private bool _paused = true;
 
     void Start()
@@ -115,6 +118,9 @@ public class GpuSphere : MonoBehaviour
         _densities      = new ComputeBuffer(_numParticles, sizeof(float) * 2);
         _spatialIndices = new ComputeBuffer(_numParticles, sizeof(uint) * 3);
         _unsortedEntries = new ComputeBuffer(_numParticles, sizeof(uint) * 3);
+        _sortPositions   = new ComputeBuffer(_numParticles, sizeof(float) * 4);
+        _sortPredicted   = new ComputeBuffer(_numParticles, sizeof(float) * 3);
+        _sortVelocities  = new ComputeBuffer(_numParticles, sizeof(float) * 3);
         _spatialOffsets = new ComputeBuffer(_numParticles, sizeof(uint));
         _colors         = new ComputeBuffer(_numParticles, sizeof(float) * 4);
         _gradient       = new ComputeBuffer(GradientSamples, sizeof(float) * 4);
@@ -128,6 +134,9 @@ public class GpuSphere : MonoBehaviour
             compute.SetBuffer(k, "Densities",          _densities);
             compute.SetBuffer(k, "SpatialIndices",     _spatialIndices);
             compute.SetBuffer(k, "UnsortedEntries",    _unsortedEntries);
+            compute.SetBuffer(k, "SortTarget_Positions",          _sortPositions);
+            compute.SetBuffer(k, "SortTarget_PredictedPositions", _sortPredicted);
+            compute.SetBuffer(k, "SortTarget_Velocities",         _sortVelocities);
             compute.SetBuffer(k, "SpatialOffsets",     _spatialOffsets);
             compute.SetBuffer(k, "Colors",             _colors);
             compute.SetBuffer(k, "SpeedGradient",      _gradient);
@@ -166,6 +175,7 @@ public class GpuSphere : MonoBehaviour
                 RunSimulationStep();
         }
 
+        _fps = Mathf.Lerp(_fps, 1f / Mathf.Max(Time.unscaledDeltaTime, 1e-5f), 0.05f); // smoothed
         UpdateColors();
         instancedMaterial.SetFloat("_ParticleRadius", particleRadius);
         _renderBounds = new Bounds(transform.position, Vector3.one * (boundsSize.magnitude + smoothingRadius * 2f)); // covers any rotation
@@ -194,6 +204,8 @@ public class GpuSphere : MonoBehaviour
         Dispatch(CountKernel);
         compute.Dispatch(ScanKernel, 1, 1, 1); // single thread group scans all counts
         Dispatch(ScatterKernel);
+        Dispatch(ReorderKernel);
+        Dispatch(CopyBackKernel);
         Dispatch(DensityKernel);
         Dispatch(PressureKernel);
         if (viscosityStrength != 0f) Dispatch(ViscosityKernel);
@@ -214,13 +226,14 @@ public class GpuSphere : MonoBehaviour
     void OnGUI()
     {
         if (_paused) GUI.Label(new Rect(10, 30, 400, 20), "PAUSED  (Space: run, Right arrow: step, R: restart)");
-        if (showInfo) GUI.Label(new Rect(10, 10, 400, 20), $"GPU 3D   Particles: {_numParticles}   Box: {boundsSize.x} x {boundsSize.y} x {boundsSize.z}");
+        if (showInfo) GUI.Label(new Rect(10, 10, 400, 20), $"GPU 3D   {_fps:F0} fps   Particles: {_numParticles}   Box: {boundsSize.x} x {boundsSize.y} x {boundsSize.z}");
     }
 
     void ReleaseBuffers()
     {
         _positions?.Release(); _predicted?.Release(); _velocities?.Release(); _densities?.Release();
-        _spatialIndices?.Release(); _unsortedEntries?.Release(); _spatialOffsets?.Release(); _colors?.Release(); _gradient?.Release();
+        _spatialIndices?.Release(); _unsortedEntries?.Release(); _spatialOffsets?.Release();
+        _sortPositions?.Release(); _sortPredicted?.Release(); _sortVelocities?.Release(); _colors?.Release(); _gradient?.Release();
         _positions = null;
     }
 

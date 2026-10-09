@@ -5,6 +5,8 @@
 #pragma kernel CountKeys
 #pragma kernel ScanOffsets
 #pragma kernel ScatterEntries
+#pragma kernel Reorder
+#pragma kernel CopyBack
 #pragma kernel CalculateDensities
 #pragma kernel CalculatePressureForce
 #pragma kernel CalculateViscosity
@@ -21,6 +23,9 @@ RWStructuredBuffer<float2> Velocities;
 RWStructuredBuffer<float2> Densities;          // x = density, y = near density
 RWStructuredBuffer<uint3>  SpatialIndices;     // (particle index, cell hash, key) sorted by key
 RWStructuredBuffer<uint3>  UnsortedEntries;    // same, in particle order, before the count sort
+RWStructuredBuffer<float4> SortTarget_Positions;          // scratch for Reorder
+RWStructuredBuffer<float2> SortTarget_PredictedPositions;
+RWStructuredBuffer<float2> SortTarget_Velocities;
 RWStructuredBuffer<uint>   SpatialOffsets;     // first entry in SpatialIndices for each key
 RWStructuredBuffer<float4> Colors;
 StructuredBuffer<float4>   SpeedGradient;      // 64 samples of the speed gradient
@@ -183,6 +188,27 @@ void ScatterEntries(uint3 id : SV_DispatchThreadID)
     SpatialIndices[end - 1] = entry;
 }
 
+// Lague's Reorder/CopyBack: physically sort the particle arrays into key order so that particle i IS sorted entry i.
+// Neighbour loops then read consecutive memory instead of chasing SpatialIndices[].x.
+[numthreads(NumThreads, 1, 1)]
+void Reorder(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= numParticles) return;
+    uint src = SpatialIndices[id.x].x;
+    SortTarget_Positions[id.x]          = Positions[src];
+    SortTarget_PredictedPositions[id.x] = PredictedPositions[src];
+    SortTarget_Velocities[id.x]         = Velocities[src];
+}
+
+[numthreads(NumThreads, 1, 1)]
+void CopyBack(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= numParticles) return;
+    Positions[id.x]          = SortTarget_Positions[id.x];
+    PredictedPositions[id.x] = SortTarget_PredictedPositions[id.x];
+    Velocities[id.x]         = SortTarget_Velocities[id.x];
+}
+
 #define FOR_EACH_NEIGHBOUR(pos, BODY)                                                         \
 {                                                                                             \
     int2 originCell = GetCell2D(pos, smoothingRadius);                                        \
@@ -195,10 +221,10 @@ void ScatterEntries(uint3 id : SV_DispatchThreadID)
         while (currIndex < numParticles)                                                      \
         {                                                                                     \
             uint3 indexData = SpatialIndices[currIndex];                                      \
+            uint neighbourIndex = currIndex;    /* arrays are reordered to sorted order */     \
             currIndex++;                                                                      \
-            if (indexData.z != key) break;      /* left this key's run */                     \
+            if (indexData.z != key) break;                                                    \
             if (indexData.y != hash) continue;  /* same key, different cell (hash collision) */\
-            uint neighbourIndex = indexData.x;                                                \
             float2 offsetToNeighbour = PredictedPositions[neighbourIndex] - pos;              \
             float sqrDst = dot(offsetToNeighbour, offsetToNeighbour);                         \
             if (sqrDst > sqrRadius) continue;                                                 \

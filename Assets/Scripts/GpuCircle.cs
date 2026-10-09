@@ -44,12 +44,14 @@ public class GpuCircle : MonoBehaviour
 
     // Kernel indices follow the #pragma kernel order in FluidSim2D.compute
     const int ExternalForcesKernel = 0, SpatialHashKernel = 1, CountKernel = 2, ScanKernel = 3, ScatterKernel = 4,
-              DensityKernel = 5, PressureKernel = 6, ViscosityKernel = 7, UpdatePositionsKernel = 8, ColorsKernel = 9;
-    const int KernelCount = 10;
+              ReorderKernel = 5, CopyBackKernel = 6, DensityKernel = 7, PressureKernel = 8, ViscosityKernel = 9,
+              UpdatePositionsKernel = 10, ColorsKernel = 11;
+    const int KernelCount = 12;
     const int ThreadGroupSize = 64;
     const int GradientSamples = 64;
 
-    private ComputeBuffer _positions, _predicted, _velocities, _densities, _spatialIndices, _unsortedEntries, _spatialOffsets, _colors, _gradient;
+    private ComputeBuffer _positions, _predicted, _velocities, _densities, _spatialIndices, _unsortedEntries, _spatialOffsets, _colors, _gradient,
+                          _sortPositions, _sortPredicted, _sortVelocities;
     private Vector4[] _spawnPositions;
     private Vector2[] _spawnPositions2;
     private Vector2[] _zeroVelocities;
@@ -58,6 +60,7 @@ public class GpuCircle : MonoBehaviour
     private Mesh _quadMesh;
     private Bounds _renderBounds;
     private LineRenderer _interactionCircle;
+    private float _fps;
     private bool _paused = true; // start paused; Space to run
     private Vector2 _interactionPos;
     private float _interactionSign;
@@ -91,6 +94,9 @@ public class GpuCircle : MonoBehaviour
         _densities      = new ComputeBuffer(numParticles, sizeof(float) * 2);
         _spatialIndices = new ComputeBuffer(numParticles, sizeof(uint) * 3);
         _unsortedEntries = new ComputeBuffer(numParticles, sizeof(uint) * 3);
+        _sortPositions   = new ComputeBuffer(numParticles, sizeof(float) * 4);
+        _sortPredicted   = new ComputeBuffer(numParticles, sizeof(float) * 2);
+        _sortVelocities  = new ComputeBuffer(numParticles, sizeof(float) * 2);
         _spatialOffsets = new ComputeBuffer(numParticles, sizeof(uint));
         _colors         = new ComputeBuffer(numParticles, sizeof(float) * 4);
         _gradient       = new ComputeBuffer(GradientSamples, sizeof(float) * 4);
@@ -105,6 +111,9 @@ public class GpuCircle : MonoBehaviour
             compute.SetBuffer(k, "Densities",          _densities);
             compute.SetBuffer(k, "SpatialIndices",     _spatialIndices);
             compute.SetBuffer(k, "UnsortedEntries",    _unsortedEntries);
+            compute.SetBuffer(k, "SortTarget_Positions",          _sortPositions);
+            compute.SetBuffer(k, "SortTarget_PredictedPositions", _sortPredicted);
+            compute.SetBuffer(k, "SortTarget_Velocities",         _sortVelocities);
             compute.SetBuffer(k, "SpatialOffsets",     _spatialOffsets);
             compute.SetBuffer(k, "Colors",             _colors);
             compute.SetBuffer(k, "SpeedGradient",      _gradient);
@@ -148,6 +157,7 @@ public class GpuCircle : MonoBehaviour
                 RunSimulationStep();
         }
 
+        _fps = Mathf.Lerp(_fps, 1f / Mathf.Max(Time.unscaledDeltaTime, 1e-5f), 0.05f); // smoothed
         UpdateColors();
         instancedMaterial.SetFloat("_ParticleRadius", particleRadius);
         Graphics.DrawMeshInstancedProcedural(_quadMesh, 0, instancedMaterial, _renderBounds, numParticles);
@@ -177,6 +187,8 @@ public class GpuCircle : MonoBehaviour
         Dispatch(CountKernel);
         compute.Dispatch(ScanKernel, 1, 1, 1); // single thread group scans all counts
         Dispatch(ScatterKernel);
+        Dispatch(ReorderKernel);
+        Dispatch(CopyBackKernel);
         Dispatch(DensityKernel);
         Dispatch(PressureKernel);
         Dispatch(ViscosityKernel);
@@ -200,13 +212,14 @@ public class GpuCircle : MonoBehaviour
     void OnGUI()
     {
         if (_paused) GUI.Label(new Rect(10, 30, 400, 20), "PAUSED  (Space: run, Right arrow: step, R: restart)");
-        if (showInfo) GUI.Label(new Rect(10, 10, 400, 20), $"GPU   Particles: {numParticles}   Bounds: {_boundsSize.x:F1} x {_boundsSize.y:F1}");
+        if (showInfo) GUI.Label(new Rect(10, 10, 400, 20), $"GPU   {_fps:F0} fps   Particles: {numParticles}   Bounds: {_boundsSize.x:F1} x {_boundsSize.y:F1}");
     }
 
     void ReleaseBuffers()
     {
         _positions?.Release(); _predicted?.Release(); _velocities?.Release(); _densities?.Release();
-        _spatialIndices?.Release(); _unsortedEntries?.Release(); _spatialOffsets?.Release(); _colors?.Release(); _gradient?.Release();
+        _spatialIndices?.Release(); _unsortedEntries?.Release(); _spatialOffsets?.Release();
+        _sortPositions?.Release(); _sortPredicted?.Release(); _sortVelocities?.Release(); _colors?.Release(); _gradient?.Release();
         _positions = null;
     }
 

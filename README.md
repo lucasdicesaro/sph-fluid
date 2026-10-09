@@ -10,11 +10,11 @@ Smoothed Particle Hydrodynamics fluid simulation in Unity, following Sebastian L
 |---|---|---|---|---|
 | `Assets/Scenes/Fluid2D.unity` | `CpuCircle` (disabled by default) | `Circle` | CPU, `Parallel.For` over a dense grid | ~4 000 |
 | `Assets/Scenes/Fluid2D.unity` | `GpuCircle` (enabled by default) | `GpuCircle` + `FluidSim2D.compute` | GPU compute shaders | ~20 000 |
-| `Assets/Scenes/Fluid3D.unity` | `GpuSphere` | `GpuSphere` + `FluidSim3D.compute` | GPU compute shaders | ~200 000 |
+| `Assets/Scenes/Fluid3D.unity` | `GpuSphere` | `GpuSphere` + `FluidSim3D.compute` | GPU compute shaders | ~400 000 |
 
 All three run the same physics from the video: predicted positions, density and near density, pressure and near pressure,
 viscosity, box collisions, and a neighbour search over a spatial grid. The GPU versions use Lague's spatial hash with a
-GPU count sort (from his [Fluid-Sim repository](https://github.com/SebLague/Fluid-Sim)) and keep all particle data on the GPU;
+GPU count sort and a reorder pass that keeps the particle arrays in cell order (both from his [Fluid-Sim repository](https://github.com/SebLague/Fluid-Sim)), and keep all particle data on the GPU;
 the particle shaders read the position and colour buffers directly. The CPU version is the reference and has the debug
 readouts (density under the cursor, density-gradient vector field, grid validation). Particles are coloured by speed.
 
@@ -85,7 +85,7 @@ Bounds are the camera view: height is the orthographic size × 2, width follows 
 
 | Parameter | Description | Default |
 |---|---|---|
-| `spawnDensity` | Particles per unit volume; particles per axis = round(size × ∛density) | 285 (≈195k particles). Lague's scene uses 600 (≈410k); raise it if your GPU keeps up |
+| `spawnDensity` | Particles per unit volume; particles per axis = round(size × ∛density) | 600 (≈410k particles, Lague's scene). Lower it if your GPU can't keep up |
 | `spawnSize` / `spawnCentre` | Spawn block size and centre (Lague's two 7-unit cubes side by side) | 7×7×14 at (−8.3, −1.3, 0) |
 | `jitterStrength` | Random offset per spawned particle | 0.035 |
 | `boundsSize` | Box size, centred on the `GpuSphere` transform | 24×10×15 |
@@ -111,4 +111,4 @@ stable and runs in slow motion.
 ## References
 
 - [Sebastian Lague — Coding Adventure: Simulating Fluids](https://www.youtube.com/watch?v=rSKMYc1CQHE)
-- [SebLague/Fluid-Sim](https://github.com/SebLague/Fluid-Sim), the source of the parameter sets and the count sort
+- [SebLague/Fluid-Sim](https://github.com/SebLague/Fluid-Sim), the source of the parameter sets, the count sort and the reorder pass
